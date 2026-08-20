@@ -1,0 +1,157 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+contract Voting {
+    // 存储候选人的得票数
+    mapping(string => uint256) public voteCounts;
+    // 存储候选人的列表
+    string[] private candidateList;
+
+    // 允许用户投票给某个候选人
+    function vote(string memory candidate) public {
+        voteCounts[candidate]++;
+    }
+
+    // 返回某个候选人的得票数
+    function getVotes(string memory candidate) public view returns (uint256) {
+        return voteCounts[candidate];
+    }
+
+    // 重置所有候选人的得票数
+    function resetVotes() public {
+        for (uint i = 0; i < candidateList.length; i++) {
+            voteCounts[candidateList[i]] = 0;
+        }
+    }
+
+    // 添加候选人
+    function addCandidate(string memory candidate) public {
+        candidateList.push(candidate);
+    }
+
+    // 反转字符串
+    function reverseString(string memory input) public pure returns (string memory) {
+        // 字符串转为字节数组
+        bytes memory b = bytes(input);
+        uint i = 0;
+        uint j = b.length - 1;
+        // 反转字节数组
+        while (i < j) {
+            bytes1 temp = b[i];
+            b[i] = b[j];
+            b[j] = temp;
+            i++;
+            j--;
+        }
+        return string(b);
+    }
+    
+    // 用于将罗马数字字符转换为整数
+    function valueOf(bytes1 b) internal pure returns (uint) {
+        if (b == 'M') return 1000;
+        if (b == 'D') return 500;
+        if (b == 'C') return 100;
+        if (b == 'L') return 50;
+        if (b == 'X') return 10;
+        if (b == 'V') return 5;
+        if (b == 'I') return 1;
+        return 0;
+    }
+
+    // 整数转罗马数字
+    function intToRoman(uint num) public pure returns (string memory) {
+        // 定义罗马数字的值和符号
+        uint16[13] memory values = [1000, 900, 500, 400, 100, 90, 50, 40, 10, 9, 5, 4, 1];
+        string[13] memory symbols = ["M", "CM", "D", "CD", "C", "XC", "L", "XL", "X", "IX", "V", "IV", "I"];
+
+        // 初始化结果字符串
+        bytes memory result = new bytes(16);
+        uint pos = 0;
+        for (uint i = 0; i < values.length; i++) {
+            while (num >= values[i]) {
+                num -= values[i];
+                for (uint j = 0; j < bytes(symbols[i]).length; j++) {
+                    // 将当前符号添加到结果中
+                    result[pos] = bytes(symbols[i])[j];
+                    pos++;
+                }
+            }
+        }
+        return string(result);
+    }
+
+    // 罗马数字转整数
+    function romanToInt(string memory s) public pure returns (uint) {
+        uint total = 0;
+        uint prev = 0;
+        // 遍历罗马数字字符串
+        for (uint i = 0; i < bytes(s).length; i++) {
+            // 获取当前字符的整数值
+            uint curr = valueOf(bytes(s)[i]);
+            // 判断当前字符是否大于前一个字符
+            if (curr > prev) {
+                total += curr - 2 * prev;
+            } else {
+                total += curr;
+            }
+            prev = curr;
+        }
+        return total;
+    }
+
+
+    // 合并两个有序数组
+    function mergeSorted(uint[] memory arr1, uint[] memory arr2) public pure returns (uint[] memory) {
+        // 结果数组，长度为两个数组的长度之和
+        uint[] memory result = new uint[](arr1.length + arr2.length);
+        uint i = 0;
+        uint j = 0;
+        uint k = 0;
+
+        // 遍历两个数组，将较小的元素添加到结果数组
+        while (i < arr1.length && j < arr2.length) {
+            if (arr1[i] <= arr2[j]) {
+                result[k] = arr1[i];
+                i++;
+            } else {
+                result[k] = arr2[j];
+                j++;
+            }
+            k++;
+        }
+        // 处理剩余元素
+        while (i < arr1.length) {
+            result[k] = arr1[i];
+            i++;
+            k++;
+        }
+        while (j < arr2.length) {
+            result[k] = arr2[j];
+            j++;
+            k++;
+        }
+
+        return result;
+    }
+
+    // 二分查找
+    function binarySearch(uint[] memory arr, uint target) public pure returns (int) {
+        if (arr.length == 0) return -1; // 空数组直接返回
+        uint left = 0;
+        uint right = arr.length - 1;
+
+        while (left <= right) {
+            // 计算中间索引
+            uint mid = left + (right - left) / 2;
+            // 检查中间元素是否为目标值
+            if (arr[mid] == target) {
+                return int(mid);
+            } else if (arr[mid] < target) {
+                left = mid + 1;
+            } else {
+                right = mid - 1;
+            }
+        }
+        return -1;
+    }
+}
