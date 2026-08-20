@@ -5,7 +5,7 @@ contract BeggingContract {
     // 地址
     address public owner;
     // 捐赠记录
-    mapping(address => uint256) public donations;
+    mapping(address => uint256) donations;
 
     // 初始化地址
     constructor() {
