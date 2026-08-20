@@ -3,9 +3,9 @@ pragma solidity ^0.8.20;
 
 contract BeggingContract {
     // 地址
-    address owner;
+    address public owner;
     // 捐赠记录
-    mapping(address => uint256) donations;
+    mapping(address => uint256) public donations;
 
     // 初始化地址
     constructor() {
