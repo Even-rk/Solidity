@@ -90,7 +90,7 @@ contract NFTAuction is Initializable {
     }
 
     // 创建拍卖
-    function crreateAuction(
+    function createAuction(
         address nftContract,        // NFT 合约地址
         uint256 nftTokenId,         // NFT token ID
         uint256 startingPrice,      // 起拍价
