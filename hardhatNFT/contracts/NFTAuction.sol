@@ -183,16 +183,23 @@ contract NFTAuction is Initializable {
         // 拍卖必须已结束
         require(isAuctionEnded(_auctionId), "auction must be ended");
 
-        // NFT转给买家
-        ERC721(auctions[_auctionId].nftContract).transferFrom(auctions[_auctionId].seller, auctions[_auctionId].highestBidder, auctions[_auctionId].nftTokenId);
+        // 检查是否有出价者
+        bool hasBidder = auctions[_auctionId].highestBidder != address(0);
+        if (!hasBidder) {
+            // 没有出价者，退还 NFT 给卖家
+            ERC721(auctions[_auctionId].nftContract).transferFrom(auctions[_auctionId].seller, auctions[_auctionId].seller, auctions[_auctionId].nftTokenId);
+        } else {
+            // NFT转给买家
+            ERC721(auctions[_auctionId].nftContract).transferFrom(auctions[_auctionId].seller, auctions[_auctionId].highestBidder, auctions[_auctionId].nftTokenId);
 
-        // 最高出价者的资金转给卖家
-        if (auctions[_auctionId].highestPaymentToken != address(0)) {
-            ERC20(auctions[_auctionId].highestPaymentToken).transfer(auctions[_auctionId].seller, auctions[_auctionId].highestBid);
-        }
-        else {
-            (bool success, ) = payable(auctions[_auctionId].seller).call{value: auctions[_auctionId].highestBid}("");
-            require(success, "ETH transfer failed");
+            // 最高出价者的资金转给卖家
+            if (auctions[_auctionId].highestPaymentToken != address(0)) {
+                ERC20(auctions[_auctionId].highestPaymentToken).transfer(auctions[_auctionId].seller, auctions[_auctionId].highestBid);
+            }
+            else {
+                (bool success, ) = payable(auctions[_auctionId].seller).call{value: auctions[_auctionId].highestBid}("");
+                require(success, "ETH transfer failed");
+            }
         }
 
         // 发送拍卖结束事件
