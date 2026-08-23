@@ -4,11 +4,12 @@ pragma solidity ^0.8.28;
 import {ERC721} from "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {Initializable} from "@openzeppelin/contracts/proxy/utils/Initializable.sol";
+import {UUPSUpgradeable} from "@openzeppelin/contracts/proxy/utils/UUPSUpgradeable.sol";
 import {AggregatorV3Interface} from "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
 
 
 // NFT拍卖市场合约，支持ETH出价的基本拍卖功能
-contract NFTAuction is Initializable {
+contract NFTAuction is Initializable, UUPSUpgradeable {
     // 合约所有者
     address public owner;
     // 代币地址 => 预言机地址
@@ -19,12 +20,12 @@ contract NFTAuction is Initializable {
         uint256 nftTokenId;               // NFT token ID
         address payable seller;           // 卖家地址
         uint256 startingPrice;            // 起拍价 (美元)
-        address paymentToken;             // 支付代币地址 （默认ETH），可支持其他EFT支付
+        address paymentToken;             // 支付代币地址 （默认ETH），可支持其他ERC20支付
         uint256 startTime;                // 拍卖开始时间
         uint256 duration;                 // 拍卖持续时间
         address highestBidder;            // 最高出价者地址
         uint256 highestBid;               // 最高出价者出价金额
-        address highestPaymentToken;      // 最高出价支付代币地址 （默认ETH），可支持其他EFT支付
+        address highestPaymentToken;      // 最高出价支付代币地址 （默认ETH），可支持其他ERC20支付
     }
     // 拍卖ID => 拍卖信息
     mapping(uint256 => Auction) public auctions;
@@ -50,6 +51,8 @@ contract NFTAuction is Initializable {
         require(msg.sender == owner, "not owner");
         _;
     }
+    // 授权升级
+    function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
 
     // 设置代币预言机地址
     function setTokenToFeed(address token, address feed) external onlyOwner {
@@ -122,6 +125,10 @@ contract NFTAuction is Initializable {
             0,                           // 最高出价者出价金额
             address(0)                   // 最高出价支付代币地址
         );
+        // 转账NFT到拍卖合约
+        ERC721(nftContract).transferFrom(msg.sender, address(this), nftTokenId);
+        // 转账成功
+        require(ERC721(nftContract).ownerOf(nftTokenId) == address(this), "nft transfer failed");
         // 发送拍卖创建事件
         emit AuctionCreated(_nextAuctionId, nftContract, nftTokenId, seller, startingPrice, block.timestamp + duration);
         // 拍卖ID计数器
@@ -140,10 +147,15 @@ contract NFTAuction is Initializable {
         // 判断paymentToken是否是0地址，0表示是ETH支付
         bool isETH = paymentToken == address(0);
         if (isETH) { // ETH支付
+            // 验证支付金额是否与出价金额一致
+            require(amount == msg.value, "amount mismatch");
             // 获取ETH价格
             int256 ethPrice = getChainlinkDataFeedLatestAnswer(paymentToken);
             // 计算出价金额
             amountUSD = uint256(amount) * uint256(ethPrice) / 10**18;
+            // 转账ETH到合约地址
+            (bool success, ) = payable(address(this)).call{value: amount}("");
+            require(success, "paymentToken transfer failed");
         }
         else {
            // 如果是非0地址，验证是否是 ERC20 
@@ -154,6 +166,10 @@ contract NFTAuction is Initializable {
             uint8 decimalsPrice = ERC20(paymentToken).decimals();
             // 计算出价金额
             amountUSD = convertToUSD(uint256(tokenPrice), uint256(amount), decimalsPrice);
+            // 转账代币
+            ERC20(paymentToken).transferFrom(msg.sender, address(this), amount);
+            // 转账成功
+            require(ERC20(paymentToken).balanceOf(address(this)) == amount, "paymentToken transfer failed");
         }
         // 验证出价金额是否大于等于起拍价
         require(amountUSD >= auctions[_auctionId].startingPrice, "amount must be greater than startingPrice");
@@ -168,9 +184,9 @@ contract NFTAuction is Initializable {
             require(success, "ETH transfer failed");
         }
         // 更新拍卖信息
-        auctions[_auctionId].highestBidder = msg.sender;
-        auctions[_auctionId].highestBid = amountUSD;
-        auctions[_auctionId].highestPaymentToken = paymentToken;
+        auctions[_auctionId].highestBidder = msg.sender; // 更新最高出价者地址
+        auctions[_auctionId].highestBid = amountUSD; // 更新最高出价金额
+        auctions[_auctionId].highestPaymentToken = paymentToken; // 更新最高出价支付代币地址
         // 发送出价事件
         emit BidPlaced(_auctionId, msg.sender, amountUSD);
     }
@@ -187,7 +203,7 @@ contract NFTAuction is Initializable {
         bool hasBidder = auctions[_auctionId].highestBidder != address(0);
         if (!hasBidder) {
             // 没有出价者，退还 NFT 给卖家
-            ERC721(auctions[_auctionId].nftContract).transferFrom(auctions[_auctionId].seller, auctions[_auctionId].seller, auctions[_auctionId].nftTokenId);
+            ERC721(auctions[_auctionId].nftContract).transferFrom(address(this), auctions[_auctionId].seller, auctions[_auctionId].nftTokenId);
         } else {
             // NFT转给买家
             ERC721(auctions[_auctionId].nftContract).transferFrom(auctions[_auctionId].seller, auctions[_auctionId].highestBidder, auctions[_auctionId].nftTokenId);
