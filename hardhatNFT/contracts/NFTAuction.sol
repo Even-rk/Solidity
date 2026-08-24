@@ -11,7 +11,7 @@ import {AggregatorV3Interface} from "@chainlink/contracts/src/v0.8/shared/interf
 // NFT拍卖市场合约，支持ETH出价的基本拍卖功能
 contract NFTAuction is Initializable, UUPSUpgradeable {
     // 合约所有者
-    address public owner;
+    address public admin;
     // 代币地址 => 预言机地址
     mapping(address => address) public tokenToOracle;
     // 拍卖结构体
@@ -38,24 +38,29 @@ contract NFTAuction is Initializable, UUPSUpgradeable {
     // 拍卖结束，记录拍卖id、最高出价者地址、最高出价金额
     event AuctionEnded(uint256 indexed auctionId, address indexed winner, uint256 amount);
 
-    // 初始化
+    // 合约初始化
     constructor() {
         // 禁用初始化器，防止重复初始化
         _disableInitializers();
-        // 初始化合约所有者为部署者
-        owner = msg.sender;
+    }
+
+    // 初始化拍卖市场
+    function initialize(address _admin) external initializer {
+        // 验证所有者地址是否有效
+        require(_admin != address(0), "admin must be set");
+        admin = _admin;
     }
 
     // 仅合约所有者才能调用
-    modifier onlyOwner() {
-        require(msg.sender == owner, "not owner");
+    modifier onlyadmin() {
+        require(msg.sender == admin, "not admin");
         _;
     }
     // 授权升级
-    function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
+    function _authorizeUpgrade(address newImplementation) internal override onlyadmin {}
 
     // 设置代币预言机地址
-    function setTokenToFeed(address token, address feed) external onlyOwner {
+    function setTokenToFeed(address token, address feed) external onlyadmin {
         tokenToOracle[token] = feed;
     }
 
@@ -102,7 +107,7 @@ contract NFTAuction is Initializable, UUPSUpgradeable {
         address paymentToken        // 支付代币地址
     ) external {
         // NFT 合约地址必须是 ERC721 合约地址
-        require(ERC721(nftContract).ownerOf(nftTokenId) == seller, "seller must be owner of nft");
+        require(ERC721(nftContract).adminOf(nftTokenId) == seller, "seller must be admin of nft");
         // 拍卖持续时间必须大于60秒
         require(duration > 60, "duration must be greater than 60");
         // 起拍价必须大于0
@@ -128,7 +133,7 @@ contract NFTAuction is Initializable, UUPSUpgradeable {
         // 转账NFT到拍卖合约
         ERC721(nftContract).transferFrom(msg.sender, address(this), nftTokenId);
         // 转账成功
-        require(ERC721(nftContract).ownerOf(nftTokenId) == address(this), "nft transfer failed");
+        require(ERC721(nftContract).adminOf(nftTokenId) == address(this), "nft transfer failed");
         // 发送拍卖创建事件
         emit AuctionCreated(_nextAuctionId, nftContract, nftTokenId, seller, startingPrice, block.timestamp + duration);
         // 拍卖ID计数器
