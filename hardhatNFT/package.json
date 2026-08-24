@@ -5,7 +5,8 @@
   "scripts": {
     "test": "hardhat test",
     "compile": "hardhat compile",
-    "keylist": "hardhat keystore list"
+    "keylist": "hardhat keystore list",
+    "deploy": "hardhat ignition depoly --network sepolia --reset"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-ethers": "^4.0.15",
