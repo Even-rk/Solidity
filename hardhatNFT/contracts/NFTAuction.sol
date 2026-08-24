@@ -100,9 +100,9 @@ contract NFTAuction is Initializable, UUPSUpgradeable {
         uint256 duration,           // 拍卖持续时间
         address seller,             // 卖家地址
         address paymentToken        // 支付代币地址
-    ) external onlyOwner {
+    ) external {
         // NFT 合约地址必须是 ERC721 合约地址
-        require(ERC721(nftContract).ownerOf(nftTokenId) == seller, "seller must be owner owner of nft");
+        require(ERC721(nftContract).ownerOf(nftTokenId) == seller, "seller must be owner of nft");
         // 拍卖持续时间必须大于60秒
         require(duration > 60, "duration must be greater than 60");
         // 起拍价必须大于0
@@ -206,14 +206,17 @@ contract NFTAuction is Initializable, UUPSUpgradeable {
             ERC721(auctions[_auctionId].nftContract).transferFrom(address(this), auctions[_auctionId].seller, auctions[_auctionId].nftTokenId);
         } else {
             // NFT转给买家
-            ERC721(auctions[_auctionId].nftContract).transferFrom(auctions[_auctionId].seller, auctions[_auctionId].highestBidder, auctions[_auctionId].nftTokenId);
+            ERC721(auctions[_auctionId].nftContract).transferFrom(address(this), auctions[_auctionId].highestBidder, auctions[_auctionId].nftTokenId);
 
             // 最高出价者的资金转给卖家
             if (auctions[_auctionId].highestPaymentToken != address(0)) {
-                ERC20(auctions[_auctionId].highestPaymentToken).transfer(auctions[_auctionId].seller, auctions[_auctionId].highestBid);
+                // ERC20：直接把合约收到的全部出价转给卖家
+                uint256 balance = ERC20(auctions[_auctionId].highestPaymentToken).balanceOf(address(this));
+                ERC20(auctions[_auctionId].highestPaymentToken).transfer(auctions[_auctionId].seller, balance);
             }
             else {
-                (bool success, ) = payable(auctions[_auctionId].seller).call{value: auctions[_auctionId].highestBid}("");
+                // ETH：直接把合约收到的全部出价转给卖家
+                (bool success, ) = payable(auctions[_auctionId].seller).call{value: address(this).balance}("");
                 require(success, "ETH transfer failed");
             }
         }
