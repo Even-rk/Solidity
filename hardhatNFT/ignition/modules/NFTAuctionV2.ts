@@ -4,4 +4,3 @@ const NFTAuctionV2Module = buildModule("NFTAuctionV2Module", (m) => {
   return { nftAuction };
 });
 export default NFTAuctionV2Module;
-4;
