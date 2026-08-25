@@ -92,6 +92,11 @@ contract NFTAuction is Initializable, UUPSUpgradeable {
         return  amount * price / 10**decimalsPrice;
     }
 
+    // 从USD金额反向计算实际代币金额
+    function convertUSDToAmount(uint256 price, uint256 amountUSD, uint256 decimalsPrice) public pure returns (uint256) {
+        return  amountUSD * (10 ** decimalsPrice) / price;
+    }
+
     // 拍卖是否结束
     function isAuctionEnded(uint256 _auctionId) public view returns (bool) {
         return block.timestamp >= auctions[_auctionId].startTime + auctions[_auctionId].duration;
@@ -171,22 +176,31 @@ contract NFTAuction is Initializable, UUPSUpgradeable {
             uint8 decimalsPrice = ERC20(paymentToken).decimals();
             // 计算出价金额
             amountUSD = convertToUSD(uint256(tokenPrice), uint256(amount), decimalsPrice);
-            // 转账代币
-            ERC20(paymentToken).transferFrom(msg.sender, address(this), amount);
-            // 转账成功
-            require(ERC20(paymentToken).balanceOf(address(this)) == amount, "paymentToken transfer failed");
+            // 转账代币到合约地址
+            bool success = ERC20(paymentToken).transferFrom(msg.sender, address(this), amount);
+            require(success, "paymentToken transfer failed");
         }
         // 验证出价金额是否大于等于起拍价
         require(amountUSD >= auctions[_auctionId].startingPrice, "amount must be greater than startingPrice");
         // 验证出价金额是否大于最高出价者
         require(amountUSD > auctions[_auctionId].highestBid, "amount must be greater than highestBid");
         // 退还原最高出价者出价金额
-        if (auctions[_auctionId].highestPaymentToken != address(0)) {
-            ERC20(auctions[_auctionId].highestPaymentToken).transfer(auctions[_auctionId].highestBidder, auctions[_auctionId].highestBid);
-        }
-        else {
-            (bool success, ) = payable(auctions[_auctionId].highestBidder).call{value: auctions[_auctionId].highestBid}("");
-            require(success, "ETH transfer failed");
+        if (auctions[_auctionId].highestBidder != address(0)) {
+            address prevPaymentToken = auctions[_auctionId].highestPaymentToken;
+            uint256 prevAmountUSD = auctions[_auctionId].highestBid;
+            if (prevPaymentToken != address(0)) {
+                // 反向计算：从 USD 金额计算出实际代币金额
+                int256 tokenPrice = getChainlinkDataFeedLatestAnswer(prevPaymentToken);
+                uint8 decimals = ERC20(prevPaymentToken).decimals();
+                uint256 actualAmount = convertUSDToAmount(uint256(tokenPrice), prevAmountUSD, decimals);
+                ERC20(prevPaymentToken).transfer(auctions[_auctionId].highestBidder, actualAmount);
+            } else {
+                // ETH 反向计算：从 USD 金额计算出实际 ETH 金额
+                int256 ethPrice = getChainlinkDataFeedLatestAnswer(prevPaymentToken);
+                uint256 actualAmount = convertUSDToAmount(uint256(ethPrice), prevAmountUSD, 18);
+                (bool success, ) = payable(auctions[_auctionId].highestBidder).call{value: actualAmount}("");
+                require(success, "ETH transfer failed");
+            }
         }
         // 更新拍卖信息
         auctions[_auctionId].highestBidder = msg.sender; // 更新最高出价者地址
