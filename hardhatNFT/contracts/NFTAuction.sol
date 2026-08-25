@@ -107,7 +107,7 @@ contract NFTAuction is Initializable, UUPSUpgradeable {
         address paymentToken        // 支付代币地址
     ) external {
         // NFT 合约地址必须是 ERC721 合约地址
-        require(ERC721(nftContract).adminOf(nftTokenId) == seller, "seller must be admin of nft");
+        require(ERC721(nftContract).ownerOf(nftTokenId) == seller, "seller must be owner of nft");
         // 拍卖持续时间必须大于60秒
         require(duration > 60, "duration must be greater than 60");
         // 起拍价必须大于0
@@ -133,7 +133,7 @@ contract NFTAuction is Initializable, UUPSUpgradeable {
         // 转账NFT到拍卖合约
         ERC721(nftContract).transferFrom(msg.sender, address(this), nftTokenId);
         // 转账成功
-        require(ERC721(nftContract).adminOf(nftTokenId) == address(this), "nft transfer failed");
+        require(ERC721(nftContract).ownerOf(nftTokenId) == address(this), "nft transfer failed");
         // 发送拍卖创建事件
         emit AuctionCreated(_nextAuctionId, nftContract, nftTokenId, seller, startingPrice, block.timestamp + duration);
         // 拍卖ID计数器
@@ -229,5 +229,11 @@ contract NFTAuction is Initializable, UUPSUpgradeable {
         // 发送拍卖结束事件
         emit AuctionEnded(_auctionId, auctions[_auctionId].highestBidder, auctions[_auctionId].highestBid);
 
+    }
+
+
+    // 获取合约版本
+    function getVersion() external pure virtual returns (string memory) {
+        return "NFTAuctionV1";
     }
 }

@@ -32,6 +32,7 @@ const NFTAuctionProxyModule = buildModule("NFTAuctionProxyModule", (m) => {
   return { proxyAdminContract, proxy };
 });
 
+// 部署拍卖合约
 const NFTAuctionModule = buildModule("NFTAuctionModule", (m) => {
   const { proxy, proxyAdminContract } = m.useModule(NFTAuctionProxyModule);
 
