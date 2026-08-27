@@ -4,11 +4,12 @@ pragma solidity ^0.8.28;
 import {ERC721} from "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {Initializable} from "@openzeppelin/contracts/proxy/utils/Initializable.sol";
+import {UUPSUpgradeable} from "@openzeppelin/contracts/proxy/utils/UUPSUpgradeable.sol";
 import {AggregatorV3Interface} from "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
 
 
 // NFT拍卖市场合约，支持ETH出价的基本拍卖功能
-contract NFTAuction is Initializable {
+contract NFTAuction is Initializable, UUPSUpgradeable{
     // 合约所有者
     address public admin;
     // 代币地址 => 预言机地址
@@ -37,6 +38,8 @@ contract NFTAuction is Initializable {
     // 拍卖结束，记录拍卖id、最高出价者地址、最高出价金额
     event AuctionEnded(uint256 indexed auctionId, address indexed winner, uint256 amount);
 
+    error OwnableUnauthorizedAccount(address account);
+
     // 合约初始化
     constructor() {
         // 禁用初始化器，防止重复初始化
@@ -55,6 +58,9 @@ contract NFTAuction is Initializable {
         require(msg.sender == admin, "not admin");
         _;
     }
+
+    // uups授权升级
+    function _authorizeUpgrade(address newImplementation) internal override onlyadmin {}
 
     // 设置代币预言机地址
     function setTokenToFeed(address token, address feed) external onlyadmin {
@@ -245,6 +251,6 @@ contract NFTAuction is Initializable {
 
     // 获取合约版本
     function getVersion() external pure virtual returns (string memory) {
-        return "NFTAuctionV1";
+        return "NFTAuctionUUPSV1";
     }
 }
