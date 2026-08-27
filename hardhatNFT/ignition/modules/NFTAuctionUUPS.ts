@@ -1,6 +1,6 @@
 import { buildModule } from "@nomicfoundation/hardhat-ignition/modules";
-const NFTAuctionUUPSProxy = buildModule("NFTAuctionUUPSProxy", (m) => {
-  const nftAuction = m.contract("NFTAuctionUUPSProxy");
+const NFTAuctionUUPS = buildModule("NFTAuctionUUPS", (m) => {
+  const nftAuction = m.contract("NFTAuctionUUPS");
   return { nftAuction };
 });
-export default NFTAuctionUUPSProxy;
+export default NFTAuctionUUPS;
