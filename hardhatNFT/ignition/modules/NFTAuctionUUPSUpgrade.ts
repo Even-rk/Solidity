@@ -14,11 +14,11 @@ const NFTAuctionUUPSUpgrade = buildModule("NFTAuctionUUPSUpgrade", (m) => {
   const { auction, proxy } = m.useModule(NFTAuctionUUPSProxy);
 
   // 部署新版本的实现合约 NFTAuctionUUPSV2
-  const auctionV2 = m.contract("NFTAuctionUUPSV2");
+  const auctionUUPSV2 = m.contract("NFTAuctionUUPSV2");
 
   // UUPS 升级交易发给代理地址本身，不需要 ProxyAdmin
   // 通过代理调用 upgradeToAndCall 函数完成升级
-  m.call(auction, "upgradeToAndCall", [auctionV2, "0x"], {
+  m.call(auction, "upgradeToAndCall", [auctionUUPSV2, "0x"], {
     // 由所有者发起升级交易
     from: owner,
   });

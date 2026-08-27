@@ -9,7 +9,7 @@ import {AggregatorV3Interface} from "@chainlink/contracts/src/v0.8/shared/interf
 
 
 // NFT拍卖市场合约，支持ETH出价的基本拍卖功能
-contract NFTAuction is Initializable, UUPSUpgradeable{
+contract NFTAuctionUUPS is Initializable, UUPSUpgradeable{
     // 合约所有者
     address public admin;
     // 代币地址 => 预言机地址
