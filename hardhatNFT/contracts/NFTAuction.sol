@@ -28,8 +28,8 @@ contract NFTAuction is Initializable {
     }
     // 拍卖ID => 拍卖信息
     mapping(uint256 => Auction) public auctions;
-    // 下一个拍卖id计数器
-    uint256 private _nextAuctionId = 0;
+    // 拍卖id计数器
+    uint256 public _auctionId = 0;
     // 拍卖创建，记录拍卖id、NFT合约地址、NFT token ID、卖家地址、起拍价、结束时间
     event AuctionCreated(uint256 indexed auctionId, address indexed nftContract, uint256 indexed tokenId, address seller, uint256 startingPrice, uint256 endTime);
     // 出价，记录拍卖id、出价者地址、出价金额
@@ -107,9 +107,9 @@ contract NFTAuction is Initializable {
         uint256 duration,           // 拍卖持续时间
         address seller,             // 卖家地址
         address paymentToken        // 支付代币地址
-    ) external {
-        // NFT 合约地址必须是 ERC721 合约地址
-        require(ERC721(nftContract).ownerOf(nftTokenId) == seller, "seller must be owner of nft");
+    ) external onlyadmin() {
+        // NFT 合约地址不能是0地址
+        require(nftContract != address(0), "invalid nftContract");
         // 拍卖持续时间必须大于60秒
         require(duration > 60, "duration must be greater than 60");
         // 起拍价必须大于0
@@ -120,7 +120,7 @@ contract NFTAuction is Initializable {
             require(ERC20(paymentToken).totalSupply() > 0, "paymentToken must be ERC20");
         }
         // 存储拍卖信息
-        auctions[_nextAuctionId] = Auction(
+        auctions[_auctionId] = Auction(
             nftContract,                 // NFT 合约地址
             nftTokenId,                  // NFT token ID
             payable(seller),             // 卖家地址
@@ -132,14 +132,14 @@ contract NFTAuction is Initializable {
             0,                           // 最高出价者出价金额
             address(0)                   // 最高出价支付代币地址
         );
-        // 转账NFT到拍卖合约
-        ERC721(nftContract).transferFrom(msg.sender, address(this), nftTokenId);
+        // 转账NFT到拍卖合约，从参数传入的seller地址转移（seller已经授权拍卖合约）
+        ERC721(nftContract).transferFrom(seller, address(this), nftTokenId);
         // 转账成功
         require(ERC721(nftContract).ownerOf(nftTokenId) == address(this), "nft transfer failed");
         // 发送拍卖创建事件
-        emit AuctionCreated(_nextAuctionId, nftContract, nftTokenId, seller, startingPrice, block.timestamp + duration);
+        emit AuctionCreated(_auctionId, nftContract, nftTokenId, seller, startingPrice, block.timestamp + duration);
         // 拍卖ID计数器
-        _nextAuctionId++;
+        _auctionId++;
     }
 
 
@@ -242,6 +242,11 @@ contract NFTAuction is Initializable {
 
     }
 
+
+    // 获取下一个拍卖ID（用于测试）
+    function auctionId() external view returns (uint256) {
+        return _auctionId;
+    }
 
     // 获取合约版本
     function getVersion() external pure virtual returns (string memory) {

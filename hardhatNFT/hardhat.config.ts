@@ -21,6 +21,11 @@ export default defineConfig({
         },
       },
     },
+    npmFilesToBuild: [
+      // 编译/部署合约时需要的 OpenZeppelin 合约
+      "@openzeppelin/contracts/proxy/transparent/ProxyAdmin.sol",
+      "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol",
+    ],
   },
   networks: {
     hardhatMainnet: {

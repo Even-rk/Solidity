@@ -30,15 +30,13 @@ contract NFTAuctionUUPS is Initializable, UUPSUpgradeable{
     // 拍卖ID => 拍卖信息
     mapping(uint256 => Auction) public auctions;
     // 下一个拍卖id计数器
-    uint256 private _nextAuctionId = 0;
+    uint256 public _auctionId = 0;
     // 拍卖创建，记录拍卖id、NFT合约地址、NFT token ID、卖家地址、起拍价、结束时间
     event AuctionCreated(uint256 indexed auctionId, address indexed nftContract, uint256 indexed tokenId, address seller, uint256 startingPrice, uint256 endTime);
     // 出价，记录拍卖id、出价者地址、出价金额
     event BidPlaced(uint256 indexed auctionId, address indexed bidder, uint256 amount);
     // 拍卖结束，记录拍卖id、最高出价者地址、最高出价金额
     event AuctionEnded(uint256 indexed auctionId, address indexed winner, uint256 amount);
-
-    error OwnableUnauthorizedAccount(address account);
 
     // 合约初始化
     constructor() {
@@ -113,7 +111,7 @@ contract NFTAuctionUUPS is Initializable, UUPSUpgradeable{
         uint256 duration,           // 拍卖持续时间
         address seller,             // 卖家地址
         address paymentToken        // 支付代币地址
-    ) external {
+    ) external onlyadmin() {
         // NFT 合约地址必须是 ERC721 合约地址
         require(ERC721(nftContract).ownerOf(nftTokenId) == seller, "seller must be owner of nft");
         // 拍卖持续时间必须大于60秒
@@ -126,7 +124,7 @@ contract NFTAuctionUUPS is Initializable, UUPSUpgradeable{
             require(ERC20(paymentToken).totalSupply() > 0, "paymentToken must be ERC20");
         }
         // 存储拍卖信息
-        auctions[_nextAuctionId] = Auction(
+        auctions[_auctionId] = Auction(
             nftContract,                 // NFT 合约地址
             nftTokenId,                  // NFT token ID
             payable(seller),             // 卖家地址
@@ -139,13 +137,13 @@ contract NFTAuctionUUPS is Initializable, UUPSUpgradeable{
             address(0)                   // 最高出价支付代币地址
         );
         // 转账NFT到拍卖合约
-        ERC721(nftContract).transferFrom(msg.sender, address(this), nftTokenId);
+        ERC721(nftContract).transferFrom(seller, address(this), nftTokenId);
         // 转账成功
         require(ERC721(nftContract).ownerOf(nftTokenId) == address(this), "nft transfer failed");
         // 发送拍卖创建事件
-        emit AuctionCreated(_nextAuctionId, nftContract, nftTokenId, seller, startingPrice, block.timestamp + duration);
+        emit AuctionCreated(_auctionId, nftContract, nftTokenId, seller, startingPrice, block.timestamp + duration);
         // 拍卖ID计数器
-        _nextAuctionId++;
+        _auctionId++;
     }
 
 
