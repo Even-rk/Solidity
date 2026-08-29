@@ -95,8 +95,8 @@ contract NFTAuction is Initializable {
     }
 
     // 拍卖是否结束
-    function isAuctionEnded(uint256 _auctionId) public view returns (bool) {
-        return block.timestamp >= auctions[_auctionId].startTime + auctions[_auctionId].duration;
+    function isAuctionEnded(uint256 __auctionId) public view returns (bool) {
+        return block.timestamp >= auctions[__auctionId].startTime + auctions[__auctionId].duration;
     }
 
     // 创建拍卖
@@ -132,7 +132,7 @@ contract NFTAuction is Initializable {
             0,                           // 最高出价者出价金额
             address(0)                   // 最高出价支付代币地址
         );
-        // 转账NFT到拍卖合约，从参数传入的seller地址转移（seller已经授权拍卖合约）
+        // 转账NFT到拍卖合约，从参数传入的seller地址转移到拍卖合约地址
         ERC721(nftContract).transferFrom(seller, address(this), nftTokenId);
         // 转账成功
         require(ERC721(nftContract).ownerOf(nftTokenId) == address(this), "nft transfer failed");
@@ -144,13 +144,13 @@ contract NFTAuction is Initializable {
 
 
     // 出价
-    function bid(uint256 _auctionId, uint256 amount, address paymentToken) external payable {
+    function bid(uint256 __auctionId, uint256 amount, address paymentToken) external payable {
         // 最终出价的美元金额
         uint256 amountUSD;
         // 拍卖ID必须存在
-        require(auctions[_auctionId].nftContract != address(0), "auctionId must exist");
+        require(auctions[__auctionId].nftContract != address(0), "auctionId must exist");
         // 拍卖必须未结束
-        require(!isAuctionEnded(_auctionId), "auction must not be ended");
+        require(!isAuctionEnded(__auctionId), "auction must not be ended"); 
         // 判断paymentToken是否是0地址，0表示是ETH支付
         bool isETH = paymentToken == address(0);
         if (isETH) { // ETH支付
@@ -160,9 +160,6 @@ contract NFTAuction is Initializable {
             int256 ethPrice = getChainlinkDataFeedLatestAnswer(paymentToken);
             // 计算出价金额
             amountUSD = uint256(amount) * uint256(ethPrice) / 10**18;
-            // 转账ETH到合约地址
-            (bool success, ) = payable(address(this)).call{value: amount}("");
-            require(success, "paymentToken transfer failed");
         }
         else {
            // 如果是非0地址，验证是否是 ERC20 
@@ -178,74 +175,70 @@ contract NFTAuction is Initializable {
             require(success, "paymentToken transfer failed");
         }
         // 验证出价金额是否大于等于起拍价
-        require(amountUSD >= auctions[_auctionId].startingPrice, "amount must be greater than startingPrice");
+        require(amountUSD >= auctions[__auctionId].startingPrice, "amount must be greater than startingPrice");
         // 验证出价金额是否大于最高出价者
-        require(amountUSD > auctions[_auctionId].highestBid, "amount must be greater than highestBid");
+        require(amountUSD > auctions[__auctionId].highestBid, "amount must be greater than highestBid");
         // 退还原最高出价者出价金额
-        if (auctions[_auctionId].highestBidder != address(0)) {
-            address prevPaymentToken = auctions[_auctionId].highestPaymentToken;
-            uint256 prevAmountUSD = auctions[_auctionId].highestBid;
+        if (auctions[__auctionId].highestBidder != address(0)) {
+            address prevPaymentToken = auctions[__auctionId].highestPaymentToken;
+            uint256 prevAmountUSD = auctions[__auctionId].highestBid;
             if (prevPaymentToken != address(0)) {
                 // 反向计算：从 USD 金额计算出实际代币金额
                 int256 tokenPrice = getChainlinkDataFeedLatestAnswer(prevPaymentToken);
                 uint8 decimals = ERC20(prevPaymentToken).decimals();
                 uint256 actualAmount = convertUSDToAmount(uint256(tokenPrice), prevAmountUSD, decimals);
-                ERC20(prevPaymentToken).transfer(auctions[_auctionId].highestBidder, actualAmount);
+                // 转账代币到最高出价者地址
+                bool success = ERC20(prevPaymentToken).transfer(auctions[__auctionId].highestBidder, actualAmount);
+                require(success, "ERC20 transfer failed");
             } else {
                 // ETH 反向计算：从 USD 金额计算出实际 ETH 金额
                 int256 ethPrice = getChainlinkDataFeedLatestAnswer(prevPaymentToken);
                 uint256 actualAmount = convertUSDToAmount(uint256(ethPrice), prevAmountUSD, 18);
-                (bool success, ) = payable(auctions[_auctionId].highestBidder).call{value: actualAmount}("");
+                (bool success, ) = payable(auctions[__auctionId].highestBidder).call{value: actualAmount}("");
                 require(success, "ETH transfer failed");
             }
         }
         // 更新拍卖信息
-        auctions[_auctionId].highestBidder = msg.sender; // 更新最高出价者地址
-        auctions[_auctionId].highestBid = amountUSD; // 更新最高出价金额
-        auctions[_auctionId].highestPaymentToken = paymentToken; // 更新最高出价支付代币地址
+        auctions[__auctionId].highestBidder = msg.sender; // 更新最高出价者地址
+        auctions[__auctionId].highestBid = amountUSD; // 更新最高出价金额
+        auctions[__auctionId].highestPaymentToken = paymentToken; // 更新最高出价支付代币地址
         // 发送出价事件
-        emit BidPlaced(_auctionId, msg.sender, amountUSD);
+        emit BidPlaced(__auctionId, msg.sender, amountUSD);
     }
 
 
     // 结束拍卖
-    function endAuction(uint256 _auctionId) external {
+    function endAuction(uint256 __auctionId) external {
         // 拍卖ID必须存在
-        require(auctions[_auctionId].nftContract != address(0), "auctionId must exist");
+        require(auctions[__auctionId].nftContract != address(0), "auctionId must exist");
         // 拍卖必须已结束
-        require(isAuctionEnded(_auctionId), "auction must be ended");
+        require(isAuctionEnded(__auctionId), "auction must be ended");
 
         // 检查是否有出价者
-        bool hasBidder = auctions[_auctionId].highestBidder != address(0);
+        bool hasBidder = auctions[__auctionId].highestBidder != address(0);
         if (!hasBidder) {
             // 没有出价者，退还 NFT 给卖家
-            ERC721(auctions[_auctionId].nftContract).transferFrom(address(this), auctions[_auctionId].seller, auctions[_auctionId].nftTokenId);
+            ERC721(auctions[__auctionId].nftContract).transferFrom(address(this), auctions[__auctionId].seller, auctions[__auctionId].nftTokenId);
         } else {
             // NFT转给买家
-            ERC721(auctions[_auctionId].nftContract).transferFrom(address(this), auctions[_auctionId].highestBidder, auctions[_auctionId].nftTokenId);
+            ERC721(auctions[__auctionId].nftContract).transferFrom(address(this), auctions[__auctionId].highestBidder, auctions[__auctionId].nftTokenId);
 
             // 最高出价者的资金转给卖家
-            if (auctions[_auctionId].highestPaymentToken != address(0)) {
+            if (auctions[__auctionId].highestPaymentToken != address(0)) {
                 // ERC20：直接把合约收到的全部出价转给卖家
-                uint256 balance = ERC20(auctions[_auctionId].highestPaymentToken).balanceOf(address(this));
-                ERC20(auctions[_auctionId].highestPaymentToken).transfer(auctions[_auctionId].seller, balance);
+                uint256 balance = ERC20(auctions[__auctionId].highestPaymentToken).balanceOf(address(this));
+                ERC20(auctions[__auctionId].highestPaymentToken).transfer(auctions[__auctionId].seller, balance);
             }
             else {
                 // ETH：直接把合约收到的全部出价转给卖家
-                (bool success, ) = payable(auctions[_auctionId].seller).call{value: address(this).balance}("");
+                (bool success, ) = payable(auctions[__auctionId].seller).call{value: address(this).balance}("");
                 require(success, "ETH transfer failed");
             }
         }
 
         // 发送拍卖结束事件
-        emit AuctionEnded(_auctionId, auctions[_auctionId].highestBidder, auctions[_auctionId].highestBid);
+        emit AuctionEnded(__auctionId, auctions[__auctionId].highestBidder, auctions[__auctionId].highestBid);
 
-    }
-
-
-    // 获取下一个拍卖ID（用于测试）
-    function auctionId() external view returns (uint256) {
-        return _auctionId;
     }
 
     // 获取合约版本

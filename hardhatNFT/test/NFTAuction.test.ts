@@ -117,6 +117,18 @@ describe("NFTAuction", async () => {
     const usdcOracleAddress = await usdcOracle.getAddress();
     await auction.connect(admin).setTokenToFeed(usdcAddress, usdcOracleAddress);
 
+    // 设置usdc余额
+    const usdcBalance = ethers.parseUnits("10000", 6);
+
+    // 给bider1和bider2分配USDC
+    await usdcToken.transfer(bider1.address, usdcBalance);
+    await usdcToken.transfer(bider2.address, usdcBalance);
+
+    // 授权bider1和bider2使用USDC代币
+    const auctionAddress = await auction.getAddress();
+    await usdcToken.connect(bider1).approve(auctionAddress, usdcBalance);
+    await usdcToken.connect(bider2).approve(auctionAddress, usdcBalance);
+
     // 为卖家铸造NFT id 1
     await nft.mint(seller.address);
     // 为卖家铸造NFT id 2
@@ -124,14 +136,13 @@ describe("NFTAuction", async () => {
     // 为卖家铸造NFT id 3
     await nft.mint(seller.address);
     // 卖家授权拍卖合约管理NFT
-    const auctionAddress = await auction.getAddress();
     await nft.connect(seller).setApprovalForAll(auctionAddress, true);
   });
 
   // 测试拍卖合约的基本功能
   // 1，测试版本号
   describe("getVersion", function () {
-    // 测试用例：应该返回正确的版本字符串"NFTAuctionV1"
+    // 应该返回正确的版本字符串"NFTAuctionV1"
     it("should return NFTAuctionV1", async function () {
       console.log("合约版本:", await auction.getVersion());
       // 调用getVersion并断言返回值正确
@@ -140,7 +151,7 @@ describe("NFTAuction", async () => {
   });
   // 2，测试预言机价格
   describe("getChainlinkDataFeedLatestAnswer", function () {
-    // 测试用例：应该返回正确的价格
+    // 应该返回正确的价格
     it("should return correct price", async function () {
       // ETH美元价格
       const ethPrice = await auction.getChainlinkDataFeedLatestAnswer(
@@ -214,6 +225,125 @@ describe("NFTAuction", async () => {
       console.log("第二次拍卖id:", await auction._auctionId());
       // 断言拍卖id递增为2
       expect(await auction._auctionId()).to.equal(2n);
+    });
+  });
+
+  // 5，测试出价
+  describe("bid", function () {
+    // 拍卖结束后出价应该失败
+    it("should fail when not bidder when non-bidder", async function () {
+      // 创建一个拍卖，duration必须大于60秒
+      await auction.connect(admin).createAuction(
+        await nft.getAddress(), // NFT合约地址
+        1, // NFT id
+        1000, // 拍卖价格
+        120, // 拍卖持续时间
+        seller.address, // 卖家地址
+        await usdcToken.getAddress(), // 拍卖代币地址
+      );
+      // 获取拍卖id
+      const auctionId = (await auction._auctionId()) - 1n;
+      // 增加时间到拍卖结束时间
+      await networkConnection.provider.request({
+        method: "evm_increaseTime",
+        params: [120 + 1], // 超过结束时间
+      });
+      // 挖矿使时间变化生效
+      await networkConnection.provider.request({
+        method: "evm_mine",
+        params: [],
+      });
+      // 调用bid函数出价
+      await expect(
+        auction
+          .connect(seller)
+          .bid(auctionId, 1000, await usdcToken.getAddress()),
+      ).to.be.revertedWith("auction must not be ended"); // 拍卖已结束，期望错误：拍卖必须未结束才能出价
+    });
+
+    // 测试低于拍卖价出价失败
+    it("should fail when not bidder when non-bidder below min bid price", async function () {
+      // 创建一个拍卖
+      await auction.connect(admin).createAuction(
+        await nft.getAddress(), // NFT合约地址
+        1, // NFT id
+        1000, // 拍卖价格（美元）
+        120, // 拍卖持续时间
+        seller.address, // 卖家地址
+        await usdcToken.getAddress(), // 拍卖代币地址
+      );
+      // 获取拍卖id
+      const auctionId = (await auction._auctionId()) - 1n;
+      // 出价者1出价900usdc
+      const amount1 = ethers.parseUnits("900", 6);
+      const args1 = [auctionId, amount1, await usdcToken.getAddress()];
+      // 断言出价失败
+      await expect(auction.connect(bider1).bid(...args1)).to.be.revertedWith(
+        "amount must be greater than startingPrice",
+      );
+    });
+
+    // 出价高于前面的出价者，应该退还前面最高价的出价金额
+    it("should refund previous bidder when bid higher than previous bidder", async function () {
+      // 创建一个拍卖
+      await auction.connect(admin).createAuction(
+        await nft.getAddress(), // NFT合约地址
+        1, // NFT id
+        1000, // 拍卖价格（美元）
+        3600, // 拍卖持续时间
+        seller.address, // 卖家地址
+        await usdcToken.getAddress(), // 拍卖代币地址
+      );
+      // 获取拍卖id
+      const auctionId = (await auction._auctionId()) - 1n;
+      // 出价者1出价1100usdc
+      const amount1 = ethers.parseUnits("1100", 6);
+      const args1 = [auctionId, amount1, await usdcToken.getAddress()];
+      await auction.connect(bider1).bid(...args1);
+      // 断言bider1的usdc余额减少1100usdc 10000usdc减去1100usdc等于8900usdc
+      const balance = ethers.parseUnits("8900", 6);
+      expect(await usdcToken.balanceOf(bider1.address)).to.equal(balance);
+      // 出价者2出价1200usdc
+      const amount2 = ethers.parseUnits("1200", 6);
+      const args2 = [auctionId, amount2, await usdcToken.getAddress()];
+      await auction.connect(bider2).bid(...args2);
+      // 断言bider2的usdc余额减少1200usdc 10000usdc减去1200usdc等于8800usdc
+      const balance2 = ethers.parseUnits("8800", 6);
+      expect(await usdcToken.balanceOf(bider2.address)).to.equal(balance2);
+      // 出价者2高于出价者1，应该退还bider1的出价金额1100usd，看剩余金额是否是10000
+      expect(await usdcToken.balanceOf(bider1.address)).to.equal(
+        ethers.parseUnits("10000", 6),
+      );
+    });
+
+    // 测试eth出价，出价后，合约余额应该增加
+    it("should increase contract balance when bid with eth", async function () {
+      // 创建一个拍卖
+      await auction.connect(admin).createAuction(
+        await nft.getAddress(), // NFT合约地址
+        1, // NFT id
+        1000, // 拍卖价格
+        3600, // 拍卖持续时间
+        seller.address, // 卖家地址
+        await usdcToken.getAddress(), // 拍卖代币地址
+      );
+      // 获取拍卖id
+      const auctionId = (await auction._auctionId()) - 1n;
+      // 出价者1出价1eth
+      const amount1 = ethers.parseUnits("1", 18);
+      const args1 = [
+        auctionId,
+        amount1,
+        ethers.ZeroAddress,
+        { value: amount1 },
+      ];
+      await auction.connect(bider1).bid(...args1);
+      // 断言合约余额增加1eth - 使用provider获取合约地址的ETH余额
+      const auctionAddress = await auction.getAddress();
+      const balance = await networkConnection.ethers.provider.getBalance(
+        auctionAddress,
+      );
+      expect(balance).to.equal(amount1);
     });
   });
 });
