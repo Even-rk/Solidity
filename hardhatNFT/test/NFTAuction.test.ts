@@ -310,8 +310,8 @@ describe("NFTAuction", async () => {
       );
     });
 
-    // 出价高于前面的出价者，应该退还前面最高价的出价金额
-    it("should refund previous bidder when bid higher than previous bidder", async function () {
+    // 出价高于前面的出价者，应该退还前面最高价的出价金额 (USDC)
+    it("should refund previous bidder when bid higher than previous bidder with usdc", async function () {
       // 创建一个拍卖
       await auction.connect(admin).createAuction(
         await nft.getAddress(), // NFT合约地址
@@ -337,10 +337,52 @@ describe("NFTAuction", async () => {
       // 断言bider2的usdc余额减少1200usdc 10000usdc减去1200usdc等于8800usdc
       const balance2 = ethers.parseUnits("8800", 6);
       expect(await usdcToken.balanceOf(bider2.address)).to.equal(balance2);
-      // 出价者2高于出价者1，应该退还bider1的出价金额1100usd，看剩余金额是否是10000
+      // 出价者2高于出价者1，应该退还bider1的出价金额1100usdc，看剩余金额是否是10000
       expect(await usdcToken.balanceOf(bider1.address)).to.equal(
         ethers.parseUnits("10000", 6),
       );
+    });
+
+    // 出价高于前面的出价者，应该退还前面最高价的出价金额 (ETH) - 所有逻辑保持一致
+    it("should refund previous bidder when bid higher than previous bidder with eth", async function () {
+      // 创建一个拍卖
+      await auction.connect(admin).createAuction(
+        await nft.getAddress(), // NFT合约地址
+        1, // NFT id
+        1000, // 拍卖价格（美元）
+        3600, // 拍卖持续时间
+        seller.address, // 卖家地址
+        ethers.ZeroAddress, // 拍卖代币地址
+      );
+      // 获取拍卖id
+      const auctionId = (await auction._auctionId()) - 1n;
+      // 1 ETH = 3000美元 > 起拍价1000美元
+      const amount1 = ethers.parseUnits("1", 18);
+      const args1 = [
+        auctionId,
+        amount1,
+        ethers.ZeroAddress,
+        { value: amount1 },
+      ];
+      await auction.connect(bider1).bid(...args1);
+      // 获取bider1出价后的ETH余额
+      const bider1BalanceAfterBid1 =
+        await networkConnection.ethers.provider.getBalance(bider1.address);
+      // 出价者2出价2 eth > 1 ETH，满足更高出价要求
+      const amount2 = ethers.parseUnits("2", 18);
+      const args2 = [
+        auctionId,
+        amount2,
+        ethers.ZeroAddress,
+        { value: amount2 },
+      ];
+      await auction.connect(bider2).bid(...args2);
+      // 出价者2高于出价者1，应该退还bider1的出价金额
+      // 退款后余额应该增加退款金额
+      const b1FinalBalance = await networkConnection.ethers.provider.getBalance(
+        bider1.address,
+      );
+      expect(b1FinalBalance).to.equal(bider1BalanceAfterBid1 + amount1);
     });
 
     // 测试eth出价，出价后，合约余额应该增加
@@ -370,6 +412,29 @@ describe("NFTAuction", async () => {
       const balance = await networkConnection.ethers.provider.getBalance(
         auctionAddress,
       );
+      expect(balance).to.equal(amount1);
+    });
+
+    // 测试usdc出价，出价后，合约余额应该增加
+    it("should increase contract balance when bid with usdc", async function () {
+      // 创建一个拍卖
+      await auction.connect(admin).createAuction(
+        await nft.getAddress(), // NFT合约地址
+        1, // NFT id
+        1000, // 拍卖价格
+        3600, // 拍卖持续时间
+        seller.address, // 卖家地址
+        await usdcToken.getAddress(), // 拍卖代币地址
+      );
+      // 获取拍卖id
+      const auctionId = (await auction._auctionId()) - 1n;
+      // 出价者1出价1000usdc
+      const amount1 = ethers.parseUnits("1000", 6);
+      const args1 = [auctionId, amount1, await usdcToken.getAddress()];
+      await auction.connect(bider1).bid(...args1);
+      // 断言合约余额增加1000usdc - 使用balanceOf获取合约地址的USDC余额
+      const auctionAddress = await auction.getAddress();
+      const balance = await usdcToken.balanceOf(auctionAddress);
       expect(balance).to.equal(amount1);
     });
   });
