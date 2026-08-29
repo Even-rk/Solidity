@@ -373,4 +373,28 @@ describe("NFTAuction", async () => {
       expect(balance).to.equal(amount1);
     });
   });
+
+  // 6，测试结束拍卖
+  describe("endAuction", function () {
+    // 拍卖时间过时才能结束拍卖
+    it("should end auction when auction time is over", async function () {
+      // 调用createAuction函数创建拍卖
+      await auction.connect(admin).createAuction(
+        await nft.getAddress(), // NFT合约地址
+        1, // NFT id
+        1000, // 拍卖价格
+        3600, // 拍卖持续时间
+        seller.address, // 卖家地址
+        ethers.ZeroAddress, // 拍卖代币地址
+      );
+      // 拍卖id
+      const auctionId = (await auction._auctionId()) - 1n;
+      // 断言结束拍卖失败，拍卖必须超时才能结束
+      await expect(auction.endAuction(auctionId)).to.revertedWith(
+        "auction must be ended",
+      );
+    });
+
+    // 拍卖结束后，无出价者，应该退还起拍价
+  });
 });
