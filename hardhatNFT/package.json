@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "test": "hardhat test",
+    "coverage": "hardhat test --coverage",
     "compile": "hardhat compile",
     "keylist": "hardhat keystore list",
     "deploy": "hardhat ignition deploy --network sepolia --reset"

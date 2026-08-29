@@ -426,26 +426,75 @@ describe("NFTAuction", async () => {
       expect(await nft.balanceOf(seller.address)).to.equal(sellerBalance);
     });
 
-    // 拍卖结束后，有出价者，nft转给出价者，卖家得到出价金额
-    it("should transfer nft to bidder and refund starting price to seller when bidder exists", async function () {
+    // 拍卖结束后，有出价者（USDC），nft转给出价者，卖家得到出价金额
+    it("should transfer nft to bidder and transfer amount to seller when bidder exists with usdc", async function () {
       // 创建一个拍卖
       await auction.connect(admin).createAuction(
         await nft.getAddress(), // NFT合约地址
         1, // NFT id
-        1000, // 拍卖价格
+        1000, // 拍卖价格（美元）
         120, // 拍卖持续时间
         seller.address, // 卖家地址
-        ethers.ZeroAddress, // 拍卖代币地址
+        await usdcToken.getAddress(), // 支付代币：USDC
       );
       // 拍卖id
       const auctionId = (await auction._auctionId()) - 1n;
-      // 出价者1出价1100usdc
+      // 获取卖家初始USDC余额
+      const sellerInitialBalance = await usdcToken.balanceOf(seller.address);
+      // 获取买家1初始nft余额
+      const bider1InitialBalance = await nft.balanceOf(bider1.address);
+      // 出价者1出价1100usdc (1100美元)
       const amount1 = ethers.parseUnits("1100", 6);
+      const args1 = [auctionId, amount1, await usdcToken.getAddress()];
+      await auction.connect(bider1).bid(...args1);
+      // 增加时间到拍卖结束时间
+      await networkConnection.provider.request({
+        method: "evm_increaseTime",
+        params: [120 + 1], // 超过结束时间
+      });
+      // 挖矿使时间变化生效
+      await networkConnection.provider.request({
+        method: "evm_mine",
+        params: [],
+      });
+      // 结束拍卖
+      await auction.endAuction(auctionId);
+      // 断言nft应该转给出价者
+      expect(await nft.balanceOf(bider1.address)).to.equal(
+        bider1InitialBalance + 1n,
+      );
+      // 断言卖家的usdc余额应该增加1100usdc
+      expect(await usdcToken.balanceOf(seller.address)).to.equal(
+        sellerInitialBalance + amount1,
+      );
+    });
+
+    // 拍卖结束后，有出价者（ETH），nft转给出价者，卖家得到出价金额
+    it("should transfer nft to bidder and transfer amount to seller when bidder exists with eth", async function () {
+      // 创建一个拍卖
+      await auction.connect(admin).createAuction(
+        await nft.getAddress(), // NFT合约地址
+        1, // NFT id
+        1000, // 拍卖价格（美元）
+        120, // 拍卖持续时间
+        seller.address, // 卖家地址
+        ethers.ZeroAddress, // 支付代币：ETH
+      );
+      // 拍卖id
+      const auctionId = (await auction._auctionId()) - 1n;
+      // 获取卖家初始ETH余额
+      const sInitBalance = await networkConnection.ethers.provider.getBalance(
+        seller.address,
+      );
+      // 获取买家1初始nft余额
+      const bider1InitialBalance = await nft.balanceOf(bider1.address);
+      // ETH价格=3000美元，1 ETH = 3000美元 > 起拍价1000美元，满足条件
+      const ethAmount = ethers.parseUnits("1", 18);
       const args1 = [
         auctionId,
-        amount1,
-        await usdcToken.getAddress(),
-        { value: amount1 },
+        ethAmount,
+        ethers.ZeroAddress,
+        { value: ethAmount },
       ];
       await auction.connect(bider1).bid(...args1);
       // 增加时间到拍卖结束时间
@@ -461,9 +510,19 @@ describe("NFTAuction", async () => {
       // 结束拍卖
       await auction.endAuction(auctionId);
       // 断言nft应该转给出价者
-      expect(await nft.balanceOf(bider1.address)).to.equal(1n);
-      // 断言卖家的usdc余额应该增加1100usdc
-      expect(await usdcToken.balanceOf(seller.address)).to.equal(amount1);
+      expect(await nft.balanceOf(bider1.address)).to.equal(
+        bider1InitialBalance + 1n,
+      );
+      // 卖家的ETH余额应该增加 ethAmount
+      const sFinalBalance = await networkConnection.ethers.provider.getBalance(
+        seller.address,
+      );
+      expect(sFinalBalance).to.be.equal(sInitBalance + ethAmount);
     });
+  });
+
+  // 7，测试合约升级
+  describe("Upgrade Contract", function () {
+    it("should upgrade contract", async function () {});
   });
 });
