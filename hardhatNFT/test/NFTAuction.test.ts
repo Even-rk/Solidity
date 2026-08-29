@@ -396,5 +396,34 @@ describe("NFTAuction", async () => {
     });
 
     // 拍卖结束后，无出价者，应该退还起拍价
+    it("should refund starting price when no bidder", async function () {
+      // 获取卖家的nft余额
+      const sellerBalance = await nft.balanceOf(seller.address);
+      // 创建一个拍卖
+      await auction.connect(admin).createAuction(
+        await nft.getAddress(), // NFT合约地址
+        1, // NFT id
+        1000, // 拍卖价格
+        120, // 拍卖持续时间
+        seller.address, // 卖家地址
+        ethers.ZeroAddress, // 拍卖代币地址
+      );
+      // 拍卖id
+      const auctionId = (await auction._auctionId()) - 1n;
+      // 增加时间到拍卖结束时间
+      await networkConnection.provider.request({
+        method: "evm_increaseTime",
+        params: [120 + 1], // 超过结束时间
+      });
+      // 挖矿使时间变化生效
+      await networkConnection.provider.request({
+        method: "evm_mine",
+        params: [],
+      });
+      // 结束拍卖
+      await auction.endAuction(auctionId);
+      // 卖家的nft余额应该不变，因为没有出价者，所以退还了nft
+      expect(await nft.balanceOf(seller.address)).to.equal(sellerBalance);
+    });
   });
 });
