@@ -425,5 +425,45 @@ describe("NFTAuction", async () => {
       // 卖家的nft余额应该不变，因为没有出价者，所以退还了nft
       expect(await nft.balanceOf(seller.address)).to.equal(sellerBalance);
     });
+
+    // 拍卖结束后，有出价者，nft转给出价者，卖家得到出价金额
+    it("should transfer nft to bidder and refund starting price to seller when bidder exists", async function () {
+      // 创建一个拍卖
+      await auction.connect(admin).createAuction(
+        await nft.getAddress(), // NFT合约地址
+        1, // NFT id
+        1000, // 拍卖价格
+        120, // 拍卖持续时间
+        seller.address, // 卖家地址
+        ethers.ZeroAddress, // 拍卖代币地址
+      );
+      // 拍卖id
+      const auctionId = (await auction._auctionId()) - 1n;
+      // 出价者1出价1100usdc
+      const amount1 = ethers.parseUnits("1100", 6);
+      const args1 = [
+        auctionId,
+        amount1,
+        await usdcToken.getAddress(),
+        { value: amount1 },
+      ];
+      await auction.connect(bider1).bid(...args1);
+      // 增加时间到拍卖结束时间
+      await networkConnection.provider.request({
+        method: "evm_increaseTime",
+        params: [120 + 1], // 超过结束时间
+      });
+      // 挖矿使时间变化生效
+      await networkConnection.provider.request({
+        method: "evm_mine",
+        params: [],
+      });
+      // 结束拍卖
+      await auction.endAuction(auctionId);
+      // 断言nft应该转给出价者
+      expect(await nft.balanceOf(bider1.address)).to.equal(1n);
+      // 断言卖家的usdc余额应该增加1100usdc
+      expect(await usdcToken.balanceOf(seller.address)).to.equal(amount1);
+    });
   });
 });
