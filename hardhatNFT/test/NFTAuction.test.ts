@@ -261,8 +261,8 @@ describe("NFTAuction", async () => {
       ).to.be.revertedWith("auction must not be ended"); // 拍卖已结束，期望错误：拍卖必须未结束才能出价
     });
 
-    // 测试低于拍卖价出价失败
-    it("should fail when not bidder when non-bidder below min bid price", async function () {
+    // 测试低于拍卖价出价失败（USDC）
+    it("should fail when bid with usdc below min bid price", async function () {
       // 创建一个拍卖
       await auction.connect(admin).createAuction(
         await nft.getAddress(), // NFT合约地址
@@ -277,6 +277,33 @@ describe("NFTAuction", async () => {
       // 出价者1出价900usdc
       const amount1 = ethers.parseUnits("900", 6);
       const args1 = [auctionId, amount1, await usdcToken.getAddress()];
+      // 断言出价失败
+      await expect(auction.connect(bider1).bid(...args1)).to.be.revertedWith(
+        "amount must be greater than startingPrice",
+      );
+    });
+
+    // 测试低于拍卖价出价失败（ETH）
+    it("should fail when bid with ETH below min bid pricee", async function () {
+      // 创建一个拍卖，起拍价 1000 美元
+      await auction.connect(admin).createAuction(
+        await nft.getAddress(), // NFT合约地址
+        1, // NFT id
+        1000, // 拍卖价格（美元）
+        120, // 拍卖持续时间
+        seller.address, // 卖家地址
+        ethers.ZeroAddress, // 支付代币为ETH
+      );
+      // 获取拍卖id
+      const auctionId = (await auction._auctionId()) - 1n;
+      // ETH价格是 3000 美元，所以 0.3 ETH = 900 美元 < 起拍价 1000 美元
+      const amount1 = ethers.parseUnits("0.3", 18);
+      const args1 = [
+        auctionId,
+        amount1,
+        ethers.ZeroAddress,
+        { value: amount1 },
+      ];
       // 断言出价失败
       await expect(auction.connect(bider1).bid(...args1)).to.be.revertedWith(
         "amount must be greater than startingPrice",
