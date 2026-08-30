@@ -1,0 +1,653 @@
+// 引入依赖
+import { expect } from "chai"; // 断言库
+import { ethers } from "ethers";
+import { network } from "hardhat"; // Hardhat 网络连接
+
+describe("NFTAuctionUUPS", async () => {
+  // V1版本拍卖合约实例（绑定代理地址）
+  let auction: any;
+  // V2版本拍卖合约实例（用于升级测试）
+  let auctionV2: any;
+  // ERC721标准NFT合约实例
+  let nft: any;
+  // USDC稳定币合约实例（符合ERC20标准）
+  let usdcToken: any;
+  // ETH/USD价格预言机合约实例（Chainlink兼容）
+  let ethOracle: any;
+  // USDC/USD价格预言机合约实例（Chainlink兼容）
+  let usdcOracle: any;
+  // ERC1967代理合约实例，UUPS升级使用
+  let proxy: any;
+  // 拍卖合约管理员签名者，拥有合约管理权限
+  let admin: any;
+  // NFT卖家签名者，发起拍卖的测试账户
+  let seller: any;
+  // 第一个竞拍者签名者，参与出价的测试账户
+  let bider1: any;
+  // 第二个竞拍者签名者，参与出价的测试账户
+  let bider2: any;
+  // Hardhat网络连接实例，用于控制EVM状态和获取测试环境工具
+  let networkConnection: any;
+  beforeEach(async () => {
+    // 创建network连接
+    networkConnection = await network.create();
+    // 获取ethers实例
+    const { ethers } = networkConnection;
+    const { getSigners, getContractFactory, deployContract } = ethers;
+    // 测试账户
+    const [_admin, _seller, _bider1, _bider2] = await getSigners();
+    // 赋值给全局变量（用于后续管理员测试）
+    admin = _admin;
+    // 赋值给全局变量（用于后续出价人测试）
+    bider1 = _bider1;
+    bider2 = _bider2;
+    // 赋值给全局变量（用于后续卖家测试）
+    seller = _seller;
+    // 部署NFTAuctionUUPS V1合约
+    const NFTAuctionUUPS = await deployContract("NFTAuctionUUPS");
+    // 编码合约初始化数据，用于代理合约
+    const initData = NFTAuctionUUPS.interface.encodeFunctionData("initialize", [
+      admin.address,
+    ]);
+    // 获取ERC1967代理合约工厂（UUPS标准代理）
+    const erc1967Factory = await getContractFactory("ERC1967Proxy");
+    // 部署代理合约
+    proxy = await erc1967Factory.deploy(
+      await NFTAuctionUUPS.getAddress(),
+      initData,
+    );
+    // 将逻辑合约链接到代理合约，并获取可调用的合约实例
+    // 这里使用attach方法，将代理合约的地址和NFTAuctionUUPS合约的ABI绑定，创建一个可调用的合约实例
+    auction = NFTAuctionUUPS.attach(await proxy.getAddress());
+    // 部署ERC721合约
+    nft = await deployContract("NFTERC721", ["NFT", "NFT"]);
+    // 部署USDC代币合约（ERC20）,名称USDC，符号USDC，6位小数，总供应量1000000
+    usdcToken = await deployContract("MockERC20", [
+      "USDC",
+      "USDC",
+      6,
+      ethers.parseUnits("1000000", 6), // ethers.parseEther("0.000001")
+    ]);
+    // 部署ETH价格预言机合约,设置ETH价格为3000美元（保留8位小数）
+    // MockAggregatorV3 构造只需要一个参数：初始价格
+    ethOracle = await deployContract("MockAggregatorV3", [3000 * 10 ** 8]);
+    // 部署USDC价格预言机合约,设置USDC价格为1美元（保留8位小数）
+    usdcOracle = await deployContract("MockAggregatorV3", [1 * 10 ** 8]);
+
+    // 管理员设置ETH（0地址表示ETH）对应的预言机地址
+    const zeroAddress = ethers.ZeroAddress;
+    const ethOracleAddress = await ethOracle.getAddress();
+    await auction.connect(admin).setTokenToFeed(zeroAddress, ethOracleAddress);
+    // 管理员设置USDC对应的预言机地址
+    const usdcAddress = await usdcToken.getAddress();
+    const usdcOracleAddress = await usdcOracle.getAddress();
+    await auction.connect(admin).setTokenToFeed(usdcAddress, usdcOracleAddress);
+
+    // 设置usdc余额
+    const usdcBalance = ethers.parseUnits("10000", 6);
+
+    // 给bider1和bider2分配USDC
+    await usdcToken.transfer(bider1.address, usdcBalance);
+    await usdcToken.transfer(bider2.address, usdcBalance);
+
+    // 授权bider1和bider2使用USDC代币
+    const auctionAddress = await auction.getAddress();
+    await usdcToken.connect(bider1).approve(auctionAddress, usdcBalance);
+    await usdcToken.connect(bider2).approve(auctionAddress, usdcBalance);
+
+    // 为卖家铸造NFT id 1
+    await nft.mint(seller.address);
+    // 为卖家铸造NFT id 2
+    await nft.mint(seller.address);
+    // 为卖家铸造NFT id 3
+    await nft.mint(seller.address);
+    // 卖家授权拍卖合约管理NFT
+    await nft.connect(seller).setApprovalForAll(auctionAddress, true);
+  });
+
+  // 测试拍卖合约的基本功能
+  // 1，测试版本号
+  describe("getVersion", function () {
+    // 应该返回正确的版本字符串"NFTAuctionUUPSV1"
+    it("should return NFTAuctionUUPSV1", async function () {
+      console.log("合约版本:", await auction.getVersion());
+      // 调用getVersion并断言返回值正确
+      expect(await auction.getVersion()).to.equal("NFTAuctionUUPSV1");
+    });
+  });
+  // 2，测试预言机价格
+  describe("getChainlinkDataFeedLatestAnswer", function () {
+    // 应该返回正确的价格
+    it("should return correct price", async function () {
+      // ETH美元价格
+      const ethPrice = await auction.getChainlinkDataFeedLatestAnswer(
+        ethers.ZeroAddress,
+      );
+      console.log("ETH美元价格:", ethPrice); // 300000000000
+      // USDC美元价格
+      const usdcPrice = await auction.getChainlinkDataFeedLatestAnswer(
+        await usdcToken.getAddress(),
+      );
+      console.log("USDC美元价格:", usdcPrice); // 100000000
+      // 断言ETH价格大于0
+      expect(ethPrice).to.be.gt(0);
+      // 断言USDC价格大于0
+      expect(usdcPrice).to.be.gt(0);
+    });
+  });
+
+  // 3，测试初始化函数
+  describe("initialize", function () {
+    // 代理部署时已经调用过一次 initialize 完成初始化，再次调用应该失败
+    it("should fail when initialized twice", async function () {
+      // OpenZeppelin Initializable 重复初始化会抛出自定义错误 InvalidInitialization()
+      await expect(
+        auction.connect(admin).initialize(admin.address),
+      ).to.be.revertedWithCustomError(auction, "InvalidInitialization");
+    });
+  });
+
+  // 4，测试创建拍卖
+  describe("createAuction", function () {
+    // 测试用例：非管理员调用创建拍卖应该失败
+    it("should fail when not admin when non-admin", async function () {
+      // 调用createAuction函数创建拍卖
+      await expect(
+        auction.connect(seller).createAuction(
+          await nft.getAddress(), // NFT合约地址
+          1, // NFT id
+          1000, // 拍卖价格
+          3600, // 拍卖持续时间
+          seller.address, // 卖家地址
+          await usdcToken.getAddress(), // 拍卖代币地址
+        ),
+      ).to.be.revertedWith("not admin"); // 返回错误信息是否为"not admin"
+    });
+
+    // 测试用例：拍卖id应该递增
+    it("should increment auction id", async function () {
+      // 调用createAuction函数创建拍卖
+      await auction.connect(admin).createAuction(
+        await nft.getAddress(), // NFT合约地址
+        1, // NFT id
+        1000, // 拍卖价格
+        3600, // 拍卖持续时间
+        seller.address, // 卖家地址
+        await usdcToken.getAddress(), // 拍卖代币地址
+      );
+      console.log("第一次拍卖id:", await auction._auctionId());
+      // 断言拍卖id递增为1
+      expect(await auction._auctionId()).to.equal(1n);
+
+      // 第二次调用createAuction函数创建拍卖
+      await auction.connect(admin).createAuction(
+        await nft.getAddress(), // NFT合约地址
+        2, // NFT id
+        2000, // 拍卖价格
+        7600, // 拍卖持续时间
+        seller.address, // 卖家地址
+        await usdcToken.getAddress(), // 拍卖代币地址
+      );
+      console.log("第二次拍卖id:", await auction._auctionId());
+      // 断言拍卖id递增为2
+      expect(await auction._auctionId()).to.equal(2n);
+    });
+  });
+
+  // 5，测试出价
+  describe("bid", function () {
+    // 拍卖结束后出价应该失败
+    it("should fail when not bidder when non-bidder", async function () {
+      // 创建一个拍卖，duration必须大于60秒
+      await auction.connect(admin).createAuction(
+        await nft.getAddress(), // NFT合约地址
+        1, // NFT id
+        1000, // 拍卖价格
+        120, // 拍卖持续时间
+        seller.address, // 卖家地址
+        await usdcToken.getAddress(), // 拍卖代币地址
+      );
+      // 获取拍卖id
+      const auctionId = (await auction._auctionId()) - 1n;
+      // 增加时间到拍卖结束时间
+      await networkConnection.provider.request({
+        method: "evm_increaseTime",
+        params: [120 + 1], // 超过结束时间
+      });
+      // 挖矿使时间变化生效
+      await networkConnection.provider.request({
+        method: "evm_mine",
+        params: [],
+      });
+      // 调用bid函数出价
+      await expect(
+        auction
+          .connect(seller)
+          .bid(auctionId, 1000, await usdcToken.getAddress()),
+      ).to.be.revertedWith("auction must not be ended"); // 拍卖已结束，期望错误：拍卖必须未结束才能出价
+    });
+
+    // 测试低于拍卖价出价失败（USDC）
+    it("should fail when bid with usdc below min bid price", async function () {
+      // 创建一个拍卖
+      await auction.connect(admin).createAuction(
+        await nft.getAddress(), // NFT合约地址
+        1, // NFT id
+        1000, // 拍卖价格（美元）
+        120, // 拍卖持续时间
+        seller.address, // 卖家地址
+        await usdcToken.getAddress(), // 拍卖代币地址
+      );
+      // 获取拍卖id
+      const auctionId = (await auction._auctionId()) - 1n;
+      // 出价者1出价900usdc
+      const amount1 = ethers.parseUnits("900", 6);
+      const args1 = [auctionId, amount1, await usdcToken.getAddress()];
+      // 断言出价失败
+      await expect(auction.connect(bider1).bid(...args1)).to.be.revertedWith(
+        "amount must be greater than startingPrice",
+      );
+    });
+
+    // 测试低于拍卖价出价失败（ETH）
+    it("should fail when bid with ETH below min bid pricee", async function () {
+      // 创建一个拍卖，起拍价 1000 美元
+      await auction.connect(admin).createAuction(
+        await nft.getAddress(), // NFT合约地址
+        1, // NFT id
+        1000, // 拍卖价格（美元）
+        120, // 拍卖持续时间
+        seller.address, // 卖家地址
+        ethers.ZeroAddress, // 支付代币为ETH
+      );
+      // 获取拍卖id
+      const auctionId = (await auction._auctionId()) - 1n;
+      // ETH价格是 3000 美元，所以 0.3 ETH = 900 美元 < 起拍价 1000 美元
+      const amount1 = ethers.parseUnits("0.3", 18);
+      const args1 = [
+        auctionId,
+        amount1,
+        ethers.ZeroAddress,
+        { value: amount1 },
+      ];
+      // 断言出价失败
+      await expect(auction.connect(bider1).bid(...args1)).to.be.revertedWith(
+        "amount must be greater than startingPrice",
+      );
+    });
+
+    // 出价高于前面的出价者，应该退还前面最高价的出价金额 (USDC)
+    it("should refund previous bidder when bid higher than previous bidder with usdc", async function () {
+      // 创建一个拍卖
+      await auction.connect(admin).createAuction(
+        await nft.getAddress(), // NFT合约地址
+        1, // NFT id
+        1000, // 拍卖价格（美元）
+        3600, // 拍卖持续时间
+        seller.address, // 卖家地址
+        await usdcToken.getAddress(), // 拍卖代币地址
+      );
+      // 获取拍卖id
+      const auctionId = (await auction._auctionId()) - 1n;
+      // 出价者1出价1100usdc
+      const amount1 = ethers.parseUnits("1100", 6);
+      const args1 = [auctionId, amount1, await usdcToken.getAddress()];
+      await auction.connect(bider1).bid(...args1);
+      // 断言bider1的usdc余额减少1100usdc 10000usdc减去1100usdc等于8900usdc
+      const balance = ethers.parseUnits("8900", 6);
+      expect(await usdcToken.balanceOf(bider1.address)).to.equal(balance);
+      // 出价者2出价1200usdc
+      const amount2 = ethers.parseUnits("1200", 6);
+      const args2 = [auctionId, amount2, await usdcToken.getAddress()];
+      await auction.connect(bider2).bid(...args2);
+      // 断言bider2的usdc余额减少1200usdc 10000usdc减去1200usdc等于8800usdc
+      const balance2 = ethers.parseUnits("8800", 6);
+      expect(await usdcToken.balanceOf(bider2.address)).to.equal(balance2);
+      // 出价者2高于出价者1，应该退还bider1的出价金额1100usdc，看剩余金额是否是10000
+      expect(await usdcToken.balanceOf(bider1.address)).to.equal(
+        ethers.parseUnits("10000", 6),
+      );
+    });
+
+    // 出价高于前面的出价者，应该退还前面最高价的出价金额 (ETH) - 所有逻辑保持一致
+    it("should refund previous bidder when bid higher than previous bidder with eth", async function () {
+      // 创建一个拍卖
+      await auction.connect(admin).createAuction(
+        await nft.getAddress(), // NFT合约地址
+        1, // NFT id
+        1000, // 拍卖价格（美元）
+        3600, // 拍卖持续时间
+        seller.address, // 卖家地址
+        ethers.ZeroAddress, // 拍卖代币地址
+      );
+      // 获取拍卖id
+      const auctionId = (await auction._auctionId()) - 1n;
+      // 1 ETH = 3000美元 > 起拍价1000美元
+      const amount1 = ethers.parseUnits("1", 18);
+      const args1 = [
+        auctionId,
+        amount1,
+        ethers.ZeroAddress,
+        { value: amount1 },
+      ];
+      await auction.connect(bider1).bid(...args1);
+      // 获取bider1出价后的ETH余额
+      const bider1BalanceAfterBid1 =
+        await networkConnection.ethers.provider.getBalance(bider1.address);
+      // 出价者2出价2 eth > 1 ETH，满足更高出价要求
+      const amount2 = ethers.parseUnits("2", 18);
+      const args2 = [
+        auctionId,
+        amount2,
+        ethers.ZeroAddress,
+        { value: amount2 },
+      ];
+      await auction.connect(bider2).bid(...args2);
+      // 出价者2高于出价者1，应该退还bider1的出价金额
+      // 退款后余额应该增加退款金额
+      const b1FinalBalance = await networkConnection.ethers.provider.getBalance(
+        bider1.address,
+      );
+      expect(b1FinalBalance).to.equal(bider1BalanceAfterBid1 + amount1);
+    });
+
+    // 测试eth出价，出价后，合约余额应该增加
+    it("should increase contract balance when bid with eth", async function () {
+      // 创建一个拍卖
+      await auction.connect(admin).createAuction(
+        await nft.getAddress(), // NFT合约地址
+        1, // NFT id
+        1000, // 拍卖价格
+        3600, // 拍卖持续时间
+        seller.address, // 卖家地址
+        await usdcToken.getAddress(), // 拍卖代币地址
+      );
+      // 获取拍卖id
+      const auctionId = (await auction._auctionId()) - 1n;
+      // 出价者1出价1eth
+      const amount1 = ethers.parseUnits("1", 18);
+      const args1 = [
+        auctionId,
+        amount1,
+        ethers.ZeroAddress,
+        { value: amount1 },
+      ];
+      await auction.connect(bider1).bid(...args1);
+      // 断言合约余额增加1eth - 使用provider获取合约地址的ETH余额
+      const auctionAddress = await auction.getAddress();
+      const balance = await networkConnection.ethers.provider.getBalance(
+        auctionAddress,
+      );
+      expect(balance).to.equal(amount1);
+    });
+
+    // 测试usdc出价，出价后，合约余额应该增加
+    it("should increase contract balance when bid with usdc", async function () {
+      // 创建一个拍卖
+      await auction.connect(admin).createAuction(
+        await nft.getAddress(), // NFT合约地址
+        1, // NFT id
+        1000, // 拍卖价格
+        3600, // 拍卖持续时间
+        seller.address, // 卖家地址
+        await usdcToken.getAddress(), // 拍卖代币地址
+      );
+      // 获取拍卖id
+      const auctionId = (await auction._auctionId()) - 1n;
+      // 出价者1出价1000usdc
+      const amount1 = ethers.parseUnits("1000", 6);
+      const args1 = [auctionId, amount1, await usdcToken.getAddress()];
+      await auction.connect(bider1).bid(...args1);
+      // 断言合约余额增加1000usdc - 使用balanceOf获取合约地址的USDC余额
+      const auctionAddress = await auction.getAddress();
+      const balance = await usdcToken.balanceOf(auctionAddress);
+      expect(balance).to.equal(amount1);
+    });
+  });
+
+  // 6，测试结束拍卖
+  describe("endAuction", function () {
+    // 拍卖时间过时才能结束拍卖
+    it("should end auction when auction time is over", async function () {
+      // 调用createAuction函数创建拍卖
+      await auction.connect(admin).createAuction(
+        await nft.getAddress(), // NFT合约地址
+        1, // NFT id
+        1000, // 拍卖价格
+        3600, // 拍卖持续时间
+        seller.address, // 卖家地址
+        ethers.ZeroAddress, // 拍卖代币地址
+      );
+      // 拍卖id
+      const auctionId = (await auction._auctionId()) - 1n;
+      // 断言结束拍卖失败，拍卖必须超时才能结束
+      await expect(auction.endAuction(auctionId)).to.revertedWith(
+        "auction must be ended",
+      );
+    });
+
+    // 拍卖结束后，无出价者，应该退还起拍价
+    it("should refund starting price when no bidder", async function () {
+      // 获取卖家的nft余额
+      const sellerBalance = await nft.balanceOf(seller.address);
+      // 创建一个拍卖
+      await auction.connect(admin).createAuction(
+        await nft.getAddress(), // NFT合约地址
+        1, // NFT id
+        1000, // 拍卖价格
+        120, // 拍卖持续时间
+        seller.address, // 卖家地址
+        ethers.ZeroAddress, // 拍卖代币地址
+      );
+      // 拍卖id
+      const auctionId = (await auction._auctionId()) - 1n;
+      // 增加时间到拍卖结束时间
+      await networkConnection.provider.request({
+        method: "evm_increaseTime",
+        params: [120 + 1], // 超过结束时间
+      });
+      // 挖矿使时间变化生效
+      await networkConnection.provider.request({
+        method: "evm_mine",
+        params: [],
+      });
+      // 结束拍卖
+      await auction.endAuction(auctionId);
+      // 卖家的nft余额应该不变，因为没有出价者，所以退还了nft
+      expect(await nft.balanceOf(seller.address)).to.equal(sellerBalance);
+    });
+
+    // 拍卖结束后，有出价者（USDC），nft转给出价者，卖家得到出价金额
+    it("should transfer nft to bidder and transfer amount to seller when bidder exists with usdc", async function () {
+      // 创建一个拍卖
+      await auction.connect(admin).createAuction(
+        await nft.getAddress(), // NFT合约地址
+        1, // NFT id
+        1000, // 拍卖价格（美元）
+        120, // 拍卖持续时间
+        seller.address, // 卖家地址
+        await usdcToken.getAddress(), // 支付代币：USDC
+      );
+      // 拍卖id
+      const auctionId = (await auction._auctionId()) - 1n;
+      // 获取卖家初始USDC余额
+      const sellerInitialBalance = await usdcToken.balanceOf(seller.address);
+      // 获取买家1初始nft余额
+      const bider1InitialBalance = await nft.balanceOf(bider1.address);
+      // 出价者1出价1100usdc (1100美元)
+      const amount1 = ethers.parseUnits("1100", 6);
+      const args1 = [auctionId, amount1, await usdcToken.getAddress()];
+      await auction.connect(bider1).bid(...args1);
+      // 增加时间到拍卖结束时间
+      await networkConnection.provider.request({
+        method: "evm_increaseTime",
+        params: [120 + 1], // 超过结束时间
+      });
+      // 挖矿使时间变化生效
+      await networkConnection.provider.request({
+        method: "evm_mine",
+        params: [],
+      });
+      // 结束拍卖
+      await auction.endAuction(auctionId);
+      // 断言nft应该转给出价者
+      expect(await nft.balanceOf(bider1.address)).to.equal(
+        bider1InitialBalance + 1n,
+      );
+      // 断言卖家的usdc余额应该增加1100usdc
+      expect(await usdcToken.balanceOf(seller.address)).to.equal(
+        sellerInitialBalance + amount1,
+      );
+    });
+
+    // 拍卖结束后，有出价者（ETH），nft转给出价者，卖家得到出价金额
+    it("should transfer nft to bidder and transfer amount to seller when bidder exists with eth", async function () {
+      // 创建一个拍卖
+      await auction.connect(admin).createAuction(
+        await nft.getAddress(), // NFT合约地址
+        1, // NFT id
+        1000, // 拍卖价格（美元）
+        120, // 拍卖持续时间
+        seller.address, // 卖家地址
+        ethers.ZeroAddress, // 支付代币：ETH
+      );
+      // 拍卖id
+      const auctionId = (await auction._auctionId()) - 1n;
+      // 获取卖家初始ETH余额
+      const sInitBalance = await networkConnection.ethers.provider.getBalance(
+        seller.address,
+      );
+      // 获取买家1初始nft余额
+      const bider1InitialBalance = await nft.balanceOf(bider1.address);
+      // ETH价格=3000美元，1 ETH = 3000美元 > 起拍价1000美元，满足条件
+      const ethAmount = ethers.parseUnits("1", 18);
+      const args1 = [
+        auctionId,
+        ethAmount,
+        ethers.ZeroAddress,
+        { value: ethAmount },
+      ];
+      await auction.connect(bider1).bid(...args1);
+      // 增加时间到拍卖结束时间
+      await networkConnection.provider.request({
+        method: "evm_increaseTime",
+        params: [120 + 1], // 超过结束时间
+      });
+      // 挖矿使时间变化生效
+      await networkConnection.provider.request({
+        method: "evm_mine",
+        params: [],
+      });
+      // 结束拍卖
+      await auction.endAuction(auctionId);
+      // 断言nft应该转给出价者
+      expect(await nft.balanceOf(bider1.address)).to.equal(
+        bider1InitialBalance + 1n,
+      );
+      // 卖家的ETH余额应该增加 ethAmount
+      const sFinalBalance = await networkConnection.ethers.provider.getBalance(
+        seller.address,
+      );
+      expect(sFinalBalance).to.be.equal(sInitBalance + ethAmount);
+    });
+  });
+
+  // 7，测试合约升级（UUPS模式）
+  describe("Upgrade Contract (UUPS)", function () {
+    // 测试合约从V1升级到V2，验证状态保留
+    it("should upgrade contract from V1 to V2 and keep state", async function () {
+      // 获取当前V1版本号
+      const versionV1 = await auction.getVersion();
+      expect(versionV1).to.equal("NFTAuctionUUPSV1");
+
+      // 创建拍卖，验证升级后拍卖数据保留
+      await auction.connect(admin).createAuction(
+        await nft.getAddress(), // NFT合约地址
+        1, // NFT id
+        1000, // 拍卖价格
+        3600, // 拍卖持续时间
+        seller.address, // 卖家地址
+        await usdcToken.getAddress(), // 支付代币
+      );
+      const auctionId = await auction._auctionId();
+      const { deployContract } = networkConnection.ethers;
+
+      // 部署NFTAuctionUUPSV2合约
+      const auctionV2Impl = await deployContract("NFTAuctionUUPSV2");
+      const actV2Addr = await auctionV2Impl.getAddress();
+      // admin发起升级，直接通过合约调用
+      await auction.connect(admin).upgradeToAndCall(actV2Addr, "0x");
+      // 重新连接合约v2到代理地址
+      auctionV2 = auctionV2Impl.attach(await proxy.getAddress());
+      // 验证合约升级成功
+      const versionV2 = await auctionV2.getVersion();
+      expect(await auctionV2._auctionId()).to.equal(auctionId);
+      expect(versionV2).to.equal("NFTAuctionV2UUPS");
+      expect(await auctionV2.newFeature()).to.equal(
+        "this is newFeature in NFTAuctionUUPSV2",
+      );
+    });
+
+    // 测试用例：非管理员尝试升级应该失败
+    it("should fail when non-admin tries to upgrade", async function () {
+      // 管理员启动一个拍卖
+      await auction.connect(admin).createAuction(
+        await nft.getAddress(), // NFT合约地址
+        1, // NFT id
+        1000, // 拍卖价格
+        3600, // 拍卖持续时间
+        seller.address, // 卖家地址
+        await usdcToken.getAddress(), // 支付代币
+      );
+      const { deployContract } = networkConnection.ethers;
+      // 部署合约v2
+      const auctionV2Impl = await deployContract("NFTAuctionUUPSV2");
+      const actV2Addr = await auctionV2Impl.getAddress();
+      // 非管理员调用upgradeToAndCall会失败，因为_authorizeUpgrade检查onlyadmin
+      await expect(
+        auction.connect(seller).upgradeToAndCall(actV2Addr, "0x"),
+      ).to.be.revertedWith("not admin");
+    });
+
+    // 测试用例：升级后应该可以正常修改预言机设置（验证升级后的可管理性）
+    it("should change oracle after upgrade", async function () {
+      // 管理员启动一个拍卖
+      await auction.connect(admin).createAuction(
+        await nft.getAddress(), // NFT合约地址
+        1, // NFT id
+        1000, // 拍卖价格
+        3600, // 拍卖持续时间
+        seller.address, // 卖家地址
+        await usdcToken.getAddress(), // 支付代币
+      );
+      const { deployContract } = networkConnection.ethers;
+
+      // 创建新的预言机，价格为4000美元
+      const newEthOracle = await deployContract("MockAggregatorV3", [
+        4000 * 10 ** 8,
+      ]);
+
+      // 部署合约v2
+      const auctionV2Impl = await deployContract("NFTAuctionUUPSV2");
+      const actV2Addr = await auctionV2Impl.getAddress();
+
+      // UUPS执行升级：admin直接调用upgradeToAndCall
+      await auction.connect(admin).upgradeToAndCall(actV2Addr, "0x");
+
+      // 连接到升级后的V2合约
+      auctionV2 = auctionV2Impl.attach(await proxy.getAddress());
+
+      // 管理员在升级后设置新的预言机地址
+      const zeroAddr = ethers.ZeroAddress;
+      const newOracleAddr = await newEthOracle.getAddress();
+      await auctionV2.connect(admin).setTokenToFeed(zeroAddr, newOracleAddr);
+
+      // 获取新的ETH价格
+      const newPrice = await auctionV2.getChainlinkDataFeedLatestAnswer(
+        zeroAddr,
+      );
+      // 断言价格正确设置
+      expect(newPrice).to.equal(ethers.parseUnits("4000", 8));
+    });
+  });
+});

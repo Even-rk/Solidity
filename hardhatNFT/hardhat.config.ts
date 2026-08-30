@@ -25,6 +25,7 @@ export default defineConfig({
       // 编译/部署合约时需要的 OpenZeppelin 合约
       "@openzeppelin/contracts/proxy/transparent/ProxyAdmin.sol",
       "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol",
+      "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol",
     ],
   },
   networks: {
