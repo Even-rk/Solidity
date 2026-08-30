@@ -579,6 +579,7 @@ describe("NFTAuction", async () => {
 
   // 7，测试合约升级
   describe("Upgrade Contract", function () {
+    // 测试合约从V1升级到V2，验证状态保留
     it("should upgrade contract from V1 to V2 and keep state", async function () {
       // 获取当前V1版本号
       const versionV1 = await auction.getVersion();
@@ -611,6 +612,70 @@ describe("NFTAuction", async () => {
       expect(await auctionV2.newFeature()).to.equal(
         "this is newFeature in NFTAuctionV2",
       );
+    });
+
+    // 测试用例：非管理员尝试升级应该失败
+    it("should fail when non-admin tries to upgrade", async function () {
+      // 管理员启动一个拍卖
+      await auction.connect(admin).createAuction(
+        await nft.getAddress(), // NFT合约地址
+        1, // NFT id
+        1000, // 拍卖价格
+        3600, // 拍卖持续时间
+        seller.address, // 卖家地址
+        await usdcToken.getAddress(), // 支付代币
+      );
+      const { deployContract } = networkConnection.ethers;
+      // 部署合约v2
+      const auctionV2Impl = await deployContract("NFTAuctionV2");
+      const pAddr = await proxy.getAddress();
+      const actV2Addr = await auctionV2Impl.getAddress();
+      // 非管理员尝试升级会失败，触发OwnableUnauthorizedAccount错误
+      await expect(
+        proxyAdmin.connect(seller).upgradeAndCall(pAddr, actV2Addr, "0x"),
+      ).to.be.revertedWithCustomError(proxyAdmin, "OwnableUnauthorizedAccount");
+    });
+
+    // 测试用例：升级后应该可以正常修改预言机设置（验证升级后的可管理性）
+    it("should change oracle after upgrade", async function () {
+      // 管理员启动一个拍卖
+      await auction.connect(admin).createAuction(
+        await nft.getAddress(), // NFT合约地址
+        1, // NFT id
+        1000, // 拍卖价格
+        3600, // 拍卖持续时间
+        seller.address, // 卖家地址
+        await usdcToken.getAddress(), // 支付代币
+      );
+      const { deployContract } = networkConnection.ethers;
+
+      // 创建新的预言机，价格为3000美元
+      const newEthOracle = await deployContract("MockAggregatorV3", [
+        4000 * 10 ** 8,
+      ]);
+
+      // 部署合约v2
+      const auctionV2Impl = await deployContract("NFTAuctionV2");
+      const pAddr = await proxy.getAddress();
+      const actV2Addr = await auctionV2Impl.getAddress();
+
+      // 执行升级
+      await proxyAdmin.connect(pASigner).upgradeAndCall(pAddr, actV2Addr, "0x");
+
+      // 连接到升级后的V2合约
+      auctionV2 = auctionV2Impl.attach(await proxy.getAddress());
+
+      // 管理员在升级后设置新的预言机地址
+      const zeroAddr = ethers.ZeroAddress;
+      const newOracleAddr = await newEthOracle.getAddress();
+      await auctionV2.connect(admin).setTokenToFeed(zeroAddr, newOracleAddr);
+
+      // 获取新的ETH价格
+      const newPrice = await auctionV2.getChainlinkDataFeedLatestAnswer(
+        zeroAddr,
+      );
+      // 断言价格正确设置
+      expect(newPrice).to.equal(ethers.parseUnits("4000", 8));
     });
   });
 });
