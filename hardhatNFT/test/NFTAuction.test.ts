@@ -33,22 +33,12 @@ describe("NFTAuction", async () => {
   // Hardhat网络连接实例，用于控制EVM状态和获取测试环境工具
   let networkConnection: any;
   beforeEach(async () => {
-    // 创建network连接，获取ethers和networkHelpers
-    // ethers: Ethers.js库实例，提供合约交互、签名、部署等功能
-    // networkHelpers: Hardhat提供的辅助工具，用于操控EVM状态（如快进时间、挖块、快照等）
+    // 创建network连接
     networkConnection = await network.create();
+    // 获取ethers实例
     const { ethers } = networkConnection;
-    // getSigners: 获取测试账户列表，每个账户都是已资助的签名者，可以用于发送交易
-    // getContractFactory: 获取合约工厂，用于部署合约
-    // deployContract: 部署合约
-    // provider: Ethers提供者，用于读取区块链数据（如区块、余额、日志等）
     const { getSigners, getContractFactory, deployContract, provider } = ethers;
     // 测试账户
-    // admin: 合约管理员，负责初始化合约状态
-    // pASigner: 代理管理员，负责管理合约的代理
-    // seller: NFT卖家，负责上传NFT并设置拍卖参数
-    // bider1: 第一个出价者，负责出价
-    // bider2: 第二个出价者，负责出价
     const [_admin, _pASigner, _seller, _bider1, _bider2] = await getSigners();
     // 赋值给全局变量（用于后续管理员测试）
     admin = _admin;
@@ -77,7 +67,8 @@ describe("NFTAuction", async () => {
     auction = NFTAuction.attach(await proxy.getAddress());
 
     // 计算 EIP-1967 标准定义的代理管理员地址存储槽位置
-    const EIP1967 = ethers.keccak256(ethers.toUtf8Bytes("eip1967.proxy.admin"));
+    const Hash = ethers.keccak256(ethers.toUtf8Bytes("eip1967.proxy.admin"));
+    const EIP1967 = "0x" + (BigInt(Hash) - 1n).toString(16).padStart(64, "0");
 
     // 指定存储槽查询原始数据
     const proxyAdminAddr = await provider.getStorage(
@@ -588,6 +579,38 @@ describe("NFTAuction", async () => {
 
   // 7，测试合约升级
   describe("Upgrade Contract", function () {
-    it("should upgrade contract", async function () {});
+    it("should upgrade contract from V1 to V2 and keep state", async function () {
+      // 获取当前V1版本号
+      const versionV1 = await auction.getVersion();
+      expect(versionV1).to.equal("NFTAuctionV1");
+
+      // 创建拍卖，验证升级后拍卖数据保留
+      await auction.connect(admin).createAuction(
+        await nft.getAddress(), // NFT合约地址
+        1, // NFT id
+        1000, // 拍卖价格
+        3600, // 拍卖持续时间
+        seller.address, // 卖家地址
+        await usdcToken.getAddress(), // 支付代币
+      );
+      const auctionId = await auction._auctionId();
+      const { deployContract } = networkConnection.ethers;
+
+      // 部署合约v2
+      const auctionV2Impl = await deployContract("NFTAuctionV2");
+      // 代理管理合约升级到v2
+      const pAddr = await proxy.getAddress();
+      const actV2Addr = await auctionV2Impl.getAddress();
+      await proxyAdmin.connect(pASigner).upgradeAndCall(pAddr, actV2Addr, "0x");
+      // 重新连接合约v2
+      auctionV2 = auctionV2Impl.attach(await proxy.getAddress());
+      // 验证合约升级成功
+      const versionV2 = await auctionV2.getVersion();
+      expect(await auctionV2._auctionId()).to.equal(auctionId);
+      expect(versionV2).to.equal("NFTAuctionV2");
+      expect(await auctionV2.newFeature()).to.equal(
+        "this is newFeature in NFTAuctionV2",
+      );
+    });
   });
 });
