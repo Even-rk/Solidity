@@ -678,4 +678,89 @@ describe("NFTAuction", async () => {
       expect(newPrice).to.equal(ethers.parseUnits("4000", 8));
     });
   });
+
+  // 补充测试：覆盖MockAggregatorV3未测试函数
+  describe("Coverage补充 - MockAggregatorV3", function () {
+    it("should test setPrice and getPrice functions", async function () {
+      // 部署MockAggregatorV3，初始价格3000
+      const mockOracle = await networkConnection.ethers.deployContract(
+        "MockAggregatorV3",
+        [ethers.parseUnits("3000", 8)],
+      );
+
+      // 测试getPrice获取初始价格
+      expect(await mockOracle.getPrice()).to.equal(
+        ethers.parseUnits("3000", 8),
+      );
+
+      // 测试setPrice更新价格
+      await mockOracle.setPrice(ethers.parseUnits("4000", 8));
+      expect(await mockOracle.getPrice()).to.equal(
+        ethers.parseUnits("4000", 8),
+      );
+
+      // 验证latestRoundData仍然返回正确价格
+      const result = await mockOracle.latestRoundData();
+      const price = result[1];
+      expect(price).to.equal(ethers.parseUnits("4000", 8));
+    });
+  });
+
+  // 补充测试：覆盖MockERC20未测试函数
+  describe("Coverage补充 - MockERC20", function () {
+    it("should test mint function", async function () {
+      // 部署MockERC20
+      const mockToken = await networkConnection.ethers.deployContract(
+        "MockERC20",
+        ["Mock", "MOCK", 18, ethers.parseEther("1000")],
+      );
+      // 获取初始余额
+      const initialBalance = await mockToken.balanceOf(bider1.address);
+      // 测试mint函数铸造新代币
+      await mockToken.mint(bider1.address, ethers.parseEther("100"));
+      // 验证余额增加
+      expect(await mockToken.balanceOf(bider1.address)).to.equal(
+        initialBalance + ethers.parseEther("100"),
+      );
+      // 验证decimals函数返回正确值
+      expect(await mockToken.decimals()).to.equal(18);
+    });
+  });
+
+  // 补充测试：覆盖NFTERC721未测试函数
+  describe("Coverage补充 - NFTERC721", function () {
+    it("should test burn function when caller is owner", async function () {
+      // 部署一个全新的NFTERC721用于测试，保证初始状态干净
+      const { deployContract } = networkConnection.ethers;
+      const NFTERC721 = await deployContract("NFTERC721", ["TNFT", "TNFT"]);
+
+      // mint一个NFT给admin，tokenId从0开始
+      await NFTERC721.connect(admin).mint(admin.address);
+      const tokenId = 0;
+      // 验证tokenId的所有者确实是admin
+      expect(await NFTERC721.ownerOf(tokenId)).to.equal(admin.address);
+      // // 测试burn函数，持有者燃烧NFT
+      await NFTERC721.connect(admin).burn(tokenId);
+      // // 获取admin的nft的余额 （燃烧后应该为0）
+      const adminNftBalance = await NFTERC721.balanceOf(admin.address);
+      // // 验证admin的余额为0
+      expect(adminNftBalance).to.equal(0);
+    });
+
+    it("should fail burn when caller is not owner", async function () {
+      // 部署一个NFTERC721
+      const { deployContract } = networkConnection.ethers;
+      const NFTERC721 = await deployContract("NFTERC721", ["TNFT", "TNFT"]);
+
+      // mint一个NFT给admin，tokenId从0开始
+      await NFTERC721.connect(admin).mint(admin.address);
+      const tokenId = 0;
+      // 验证tokenId的所有者确实是admin
+      expect(await NFTERC721.ownerOf(tokenId)).to.equal(admin.address);
+      // 非持有者尝试燃烧应该失败
+      await expect(NFTERC721.connect(seller).burn(tokenId)).to.be.revertedWith(
+        "not owner",
+      );
+    });
+  });
 });
