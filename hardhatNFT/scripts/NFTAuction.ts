@@ -25,8 +25,24 @@ async function main() {
   );
   console.log("已连接到 NFTAuction 合约:", NFTAUCTION_ADDRESS);
 
+  // 监听合约事件
+  console.log("\n=== 事件监听 ===");
+  // 创建拍卖
+  nftAuction.on(nftAuction.filters.AuctionCreated(), (...args) => {
+    console.log("AuctionCreated 事件触发:", args);
+  });
+  // 出价
+  nftAuction.on(nftAuction.filters.BidPlaced(), (...args) => {
+    console.log("BidPlaced 事件触发:", args);
+  });
+  // 结束拍卖
+  nftAuction.on(nftAuction.filters.AuctionEnded(), (...args) => {
+    console.log("AuctionEnded 事件触发:", args);
+  });
+  console.log("✓ 事件监听器已启动");
+
   // 读取合约数据
-  console.log("\n=== 1. 读取合约数据 ===");
+  console.log("\n=== 读取合约数据 ===");
 
   // 读取合约管理员
   const admin = await nftAuction.admin();
@@ -41,7 +57,7 @@ async function main() {
   console.log("当前拍卖ID计数器:", auctionIdCounter.toString());
 
   // 设置 ETH 预言机地址
-  console.log("\n=== 2. 设置 ETH 预言机地址 ===");
+  console.log("\n=== 设置 ETH 预言机地址 ===");
 
   // Sepolia 测试网 ETH/USD 预言机地址 (Chainlink)
   const ETH_USD_PRICE = "0x694AA1769357215DE4FAC081bf1f309aDC325306";
@@ -63,7 +79,7 @@ async function main() {
   }
 
   // 创建拍卖
-  console.log("\n=== 3. 创建拍卖交易 ===");
+  console.log("\n=== 创建拍卖交易 ===");
 
   // 连接到我们的 NFT 合约
   const nftContract = await ethers.getContractAt(
@@ -74,15 +90,51 @@ async function main() {
 
   // 检查 tokenId 从 0 开始，因为 _nextTokenId 初始是 0
   // 检查你是否拥有 tokenId = 0 的 NFT（第一个 mint 出来的 NFT 是 tokenId 0
+  let tokenIdToUse = 0n;
   const owner = await nftContract.ownerOf(0n).catch(() => null);
-  if (!owner || owner.toLowerCase() !== signer.address.toLowerCase()) {
-    console.log("当前账户没有 NFT，正在自动 mint...");
-    // 第一个 mint 出来的 tokenId 是 0
+  if (
+    !owner ||
+    (owner.toLowerCase() !== signer.address.toLowerCase() &&
+      owner.toLowerCase() !== NFTAUCTION_ADDRESS.toLowerCase())
+  ) {
+    console.log("当前账户没有可用的 NFT，正在自动 mint 新的...");
+    // mint 新的 NFT 到当前账户，mint 函数直接返回新 tokenId
     const mintTx = await nftContract.mint(signer.address);
-    await mintTx.wait();
-    console.log("✓ 已 mint 第一个 NFT 到当前账户，tokenId = 0");
+    const receipt = await mintTx.wait();
+    // 从交易日志中获取 mint 返回的 tokenId
+    const iface = nftContract.interface;
+    for (const log of receipt.logs) {
+      try {
+        const parsedLog = iface.parseLog(log);
+        if (parsedLog && parsedLog.name === "Transfer") {
+          // Transfer 事件的第三个参数就是 tokenId
+          tokenIdToUse = parsedLog.args.tokenId;
+          break;
+        }
+      } catch {}
+    }
+    console.log(`✓ 已 mint 新的 NFT 到当前账户，tokenId = ${tokenIdToUse}`);
+  } else if (owner.toLowerCase() === NFTAUCTION_ADDRESS.toLowerCase()) {
+    console.log(`tokenId = 0 已经在拍卖合约中，需要 mint 新的 NFT...`);
+    // mint 新的 NFT 到当前账户，mint 函数直接返回新 tokenId
+    const mintTx = await nftContract.mint(signer.address);
+    const receipt = await mintTx.wait();
+    // 从交易日志中获取 mint 返回的 tokenId
+    const iface = nftContract.interface;
+    for (const log of receipt.logs) {
+      try {
+        const parsedLog = iface.parseLog(log);
+        if (parsedLog && parsedLog.name === "Transfer") {
+          // Transfer 事件的第三个参数就是 tokenId
+          tokenIdToUse = parsedLog.args.tokenId;
+          break;
+        }
+      } catch {}
+    }
+    console.log(`✓ 已 mint 新的 NFT 到当前账户，tokenId = ${tokenIdToUse}`);
   } else {
     console.log("✓ 当前账户拥有 tokenId = 0 的 NFT");
+    tokenIdToUse = 0n;
   }
 
   // 授权拍卖合约转移你的 NFT
@@ -106,7 +158,7 @@ async function main() {
   // 创建拍卖
   const createTx = await nftAuction.createAuction(
     NFT_CONTRACT_ADDRESS, // NFT 合约地址
-    0n, // NFT token ID
+    tokenIdToUse, // NFT token ID (动态获取可用的)
     20, // 起拍价 20 USD
     120, // 持续时间 2 分钟
     signer.address, // 卖家地址（当前账户）
@@ -129,15 +181,20 @@ async function main() {
     })
     .find((e) => e?.name === "AuctionCreated");
 
+  // 从事件中直接获取拍卖ID
+  let auctionId;
   if (event) {
-    console.log("✓ 拍卖创建成功，拍卖ID:", event.args.auctionId.toString());
+    auctionId = event.args.auctionId;
+    console.log("✓ 拍卖创建成功，拍卖ID:", auctionId.toString());
+  } else {
+    // 如果没找到事件，回退到从计数器读取
+    const currentAuctionIdCounter = await nftAuction._auctionId();
+    auctionId = currentAuctionIdCounter - 1n;
+    console.log("✓ 拍卖创建成功，拍卖ID:", auctionId.toString());
   }
 
-  // ======================================
-  // 步骤 6: 发送交易 - 出价
-  // ======================================
-  console.log("\n=== 4. 出价演示 ===");
-  const auctionId = 0n; // 第一个拍卖
+  // 出价
+  console.log("\n=== 出价 ===");
   const bidUSD = 25; // 出价 25 USD
   const bidAmountWei = ethers.parseEther("0.015"); // 0.015 ETH ≈ 30 USD，足够支付 25 USD
 
@@ -165,31 +222,15 @@ async function main() {
   );
   console.log("最高出价者:", updatedAuction.highestBidder);
 
-  // 步骤 7: 监听合约事件
-  console.log("\n=== 5. 事件监听 ===");
-  nftAuction.on(
-    nftAuction.filters.BidPlaced(),
-    (auctionId, bidder, amount, _) => {
-      console.log(
-        `[事件监听] 拍卖 #${auctionId} 收到新出价: ${bidder} 出价 ${ethers.formatUnits(
-          amount,
-          8,
-        )} USD`,
-      );
-    },
-  );
-
-  // 可以监听 AuctionCreated 和 AuctionEnded
-  nftAuction.on(nftAuction.filters.AuctionCreated(), (...args) => {
-    console.log(args);
+  // 结束拍卖 - 等待自动结束拍卖
+  console.log("等待自动结束拍卖...");
+  await new Promise((resolve) => {
+    setTimeout(async () => {
+      await nftAuction.endAuction(auctionId);
+      console.log("✓ 拍卖已结束");
+      resolve(null);
+    }, 140000); // 等待 2 分钟以上
   });
-
-  console.log("✓ 事件监听器已启动，后续新出价会自动打印");
-  // 结束拍卖
-  setTimeout(async () => {
-    await nftAuction.endAuction(auctionId);
-    console.log("✓ 拍卖已结束");
-  }, 1800000);
 
   console.log("当前拍卖数量:", (await nftAuction._auctionId()).toString());
 }
