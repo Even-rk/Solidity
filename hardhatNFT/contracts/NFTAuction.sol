@@ -23,7 +23,8 @@ contract NFTAuction is Initializable {
         uint256 startTime;                // 拍卖开始时间
         uint256 duration;                 // 拍卖持续时间
         address highestBidder;            // 最高出价者地址
-        uint256 highestBid;               // 最高出价者出价金额
+        uint256 highestBid;               // 最高出价者出价金额 (美元)
+        uint256 highestBidActualAmount;   // 最高出价者实际代币金额
         address highestPaymentToken;      // 最高出价支付代币地址 （默认ETH），可支持其他ERC20支付
     }
     // 拍卖ID => 拍卖信息
@@ -129,7 +130,8 @@ contract NFTAuction is Initializable {
             block.timestamp,             // 拍卖开始时间
             duration,                    // 拍卖持续时间
             address(0),                  // 最高出价者地址
-            0,                           // 最高出价者出价金额
+            0,                           // 最高出价者出价金额 (美元)
+            0,                           // 最高出价者实际代币金额
             address(0)                   // 最高出价支付代币地址
         );
         // 转账NFT到拍卖合约，从参数传入的seller地址转移到拍卖合约地址
@@ -200,7 +202,8 @@ contract NFTAuction is Initializable {
         }
         // 更新拍卖信息
         auctions[__auctionId].highestBidder = msg.sender; // 更新最高出价者地址
-        auctions[__auctionId].highestBid = amountUSD; // 更新最高出价金额
+        auctions[__auctionId].highestBid = amountUSD; // 更新最高出价金额 (美元)
+        auctions[__auctionId].highestBidActualAmount = amount; // 更新最高出价实际代币金额
         auctions[__auctionId].highestPaymentToken = paymentToken; // 更新最高出价支付代币地址
         // 发送出价事件
         emit BidPlaced(__auctionId, msg.sender, amountUSD);
@@ -225,13 +228,17 @@ contract NFTAuction is Initializable {
 
             // 最高出价者的资金转给卖家
             if (auctions[__auctionId].highestPaymentToken != address(0)) {
-                // ERC20：直接把合约收到的全部出价转给卖家
-                uint256 balance = ERC20(auctions[__auctionId].highestPaymentToken).balanceOf(address(this));
-                ERC20(auctions[__auctionId].highestPaymentToken).transfer(auctions[__auctionId].seller, balance);
+                // ERC20：只转本场拍卖最高出价的实际金额给卖家，避免串账
+                ERC20(auctions[__auctionId].highestPaymentToken).transfer(
+                    auctions[__auctionId].seller, 
+                    auctions[__auctionId].highestBidActualAmount
+                );
             }
             else {
-                // ETH：直接把合约收到的全部出价转给卖家
-                (bool success, ) = payable(auctions[__auctionId].seller).call{value: address(this).balance}("");
+                // ETH：只转本场拍卖最高出价的实际金额给卖家，避免串账
+                (bool success, ) = payable(auctions[__auctionId].seller).call{
+                    value: auctions[__auctionId].highestBidActualAmount
+                }("");
                 require(success, "ETH transfer failed");
             }
         }
